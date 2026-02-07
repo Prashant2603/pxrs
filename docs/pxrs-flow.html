@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PXRS — Animated Flow Visualization</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/MotionPathPlugin.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0F172A;
+    color: #E2E8F0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  #controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    background: #1E293B;
+    border-bottom: 1px solid #334155;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  #controls button {
+    background: #334155;
+    color: #E2E8F0;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.15s;
+  }
+  #controls button:hover { background: #475569; }
+  #controls button.active { background: #3B82F6; border-color: #60A5FA; }
+  #controls select {
+    background: #334155;
+    color: #E2E8F0;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .scene-btns { display: flex; gap: 4px; margin-left: 10px; }
+  .scene-btns button { padding: 6px 10px; font-size: 12px; }
+  .scene-btns button.scene-active { background: #3B82F6; border-color: #60A5FA; }
+  #progress-wrap {
+    flex-shrink: 0;
+    padding: 6px 20px;
+    background: #1E293B;
+  }
+  #progress-bar {
+    width: 100%;
+    height: 6px;
+    background: #334155;
+    border-radius: 3px;
+    cursor: pointer;
+    position: relative;
+  }
+  #progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3B82F6, #10B981);
+    border-radius: 3px;
+    width: 0%;
+    transition: none;
+  }
+  #svg-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px;
+    min-height: 0;
+  }
+  svg#main {
+    width: 100%;
+    height: 100%;
+    max-width: 1200px;
+    max-height: 750px;
+  }
+  #phase-label {
+    font-size: 14px;
+    color: #94A3B8;
+    min-width: 200px;
+  }
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <button id="btn-play" title="Play/Pause">&#9654; Play</button>
+  <button id="btn-restart" title="Restart">&#9198; Restart</button>
+  <select id="speed-select" title="Playback speed">
+    <option value="0.5">0.5x</option>
+    <option value="1" selected>1x</option>
+    <option value="2">2x</option>
+  </select>
+  <div class="scene-btns">
+    <button data-scene="scene1">1</button>
+    <button data-scene="scene2">2</button>
+    <button data-scene="scene3">3</button>
+    <button data-scene="scene4">4</button>
+    <button data-scene="scene5">5</button>
+    <button data-scene="scene6">6</button>
+    <button data-scene="scene7">7</button>
+  </div>
+  <span id="phase-label">Scene 1: System Initialization</span>
+</div>
+
+<div id="progress-wrap">
+  <div id="progress-bar"><div id="progress-fill"></div></div>
+</div>
+
+<div id="svg-container">
+<svg id="main" viewBox="0 0 1100 700" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="grad-blue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="grad-green" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="grad-orange" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#D97706"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Title card -->
+  <g id="title-card" opacity="0">
+    <text x="550" y="300" text-anchor="middle" font-size="36" font-weight="700" fill="#F1F5F9">PXRS</text>
+    <text x="550" y="340" text-anchor="middle" font-size="16" fill="#94A3B8">Partitioned Registry Store</text>
+    <text x="550" y="370" text-anchor="middle" font-size="13" fill="#64748B">Virtual Partitioning &bull; Epoch Fencing &bull; Crash Recovery</text>
+  </g>
+
+  <!-- Producer -->
+  <g id="producer" opacity="0" transform="translate(60, 200)">
+    <rect x="0" y="0" width="120" height="60" rx="10" fill="#1E293B" stroke="#8B5CF6" stroke-width="2"/>
+    <text x="60" y="28" text-anchor="middle" font-size="12" fill="#A78BFA" font-weight="600">PRODUCER</text>
+    <text x="60" y="45" text-anchor="middle" font-size="11" fill="#94A3B8" id="producer-count">sent: 0</text>
+  </g>
+
+  <!-- Hash funnel -->
+  <g id="hash-funnel" opacity="0" transform="translate(230, 200)">
+    <path d="M0,0 L80,0 L60,60 L20,60 Z" fill="#1E293B" stroke="#6366F1" stroke-width="1.5"/>
+    <text x="40" y="35" text-anchor="middle" font-size="10" fill="#818CF8">hash % 8</text>
+  </g>
+
+  <!-- Connector: producer to funnel -->
+  <line id="prod-funnel-line" x1="180" y1="230" x2="230" y2="230" stroke="#475569" stroke-width="1.5" stroke-dasharray="4 3" opacity="0"/>
+
+  <!-- Partition row -->
+  <g id="partitions-group" transform="translate(115, 310)">
+  </g>
+
+  <!-- Consumers group -->
+  <g id="consumers-group" transform="translate(0, 530)">
+  </g>
+
+  <!-- Connector lines group -->
+  <g id="connectors"></g>
+
+  <!-- Messages layer -->
+  <g id="messages-layer"></g>
+
+  <!-- Status bar -->
+  <g id="status-bar" transform="translate(550, 670)">
+    <text id="status-text" x="0" y="0" text-anchor="middle" font-size="13" fill="#64748B" opacity="0"></text>
+  </g>
+
+  <!-- End card -->
+  <g id="end-card" opacity="0">
+    <rect x="250" y="200" width="600" height="280" rx="16" fill="#1E293B" stroke="#10B981" stroke-width="2"/>
+    <text x="550" y="260" text-anchor="middle" font-size="28" font-weight="700" fill="#F1F5F9">PXRS</text>
+    <text x="550" y="300" text-anchor="middle" font-size="16" fill="#10B981">All 150 messages processed</text>
+    <text x="550" y="335" text-anchor="middle" font-size="14" fill="#94A3B8">Zero loss &bull; Zero duplication</text>
+    <line x1="400" y1="360" x2="700" y2="360" stroke="#334155" stroke-width="1"/>
+    <text x="550" y="390" text-anchor="middle" font-size="12" fill="#64748B">Epoch-fenced checkpointing</text>
+    <text x="550" y="412" text-anchor="middle" font-size="12" fill="#64748B">Fair-share rebalancing</text>
+    <text x="550" y="434" text-anchor="middle" font-size="12" fill="#64748B">Crash recovery with preserved offsets</text>
+    <text x="550" y="462" text-anchor="middle" font-size="11" fill="#475569">github.com/pxrs</text>
+  </g>
+</svg>
+</div>
+
+<script>
+gsap.registerPlugin(MotionPathPlugin);
+
+// --- Constants ---
+const COLORS = {
+  A: '#3B82F6', B: '#10B981', C: '#F59E0B',
+  crash: '#EF4444', grey: '#6B7280', bg: '#1E293B',
+  border: '#475569', text: '#E2E8F0', dim: '#94A3B8'
+};
+const PARTITION_COUNT = 8;
+const PW = 100, PH = 80, PGAP = 10;
+const CONSUMER_NAMES = ['Consumer A', 'Consumer B', 'Consumer C'];
+const CONSUMER_COLORS = [COLORS.A, COLORS.B, COLORS.C];
+const CONSUMER_IDS = ['A', 'B', 'C'];
+
+// --- State ---
+let partitionEls = [];
+let consumerEls = [];
+let connectorEls = [];
+let partitionState = [];
+let consumerState = [];
+let producerSent = 0;
+
+// --- Build SVG elements ---
+function buildPartitions() {
+  const g = document.getElementById('partitions-group');
+  for (let i = 0; i < PARTITION_COUNT; i++) {
+    const x = i * (PW + PGAP);
+    const pg = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    pg.setAttribute('transform', `translate(${x}, 0)`);
+    pg.setAttribute('opacity', '0');
+    pg.innerHTML = `
+      <rect class="p-bg" x="0" y="0" width="${PW}" height="${PH}" rx="8" fill="${COLORS.bg}" stroke="${COLORS.border}" stroke-width="1.5"/>
+      <text class="p-id" x="${PW/2}" y="18" text-anchor="middle" font-size="13" font-weight="700" fill="${COLORS.dim}">P${i}</text>
+      <text class="p-owner" x="${PW/2}" y="34" text-anchor="middle" font-size="10" fill="${COLORS.grey}">unowned</text>
+      <text class="p-cp" x="${PW/2}" y="50" text-anchor="middle" font-size="10" fill="${COLORS.dim}">cp: 0</text>
+      <text class="p-epoch" x="${PW/2}" y="64" text-anchor="middle" font-size="10" fill="${COLORS.dim}">epoch: 0</text>
+      <rect class="p-buf-bar" x="5" y="${PH - 8}" width="0" height="4" rx="2" fill="${COLORS.grey}" opacity="0.5"/>
+    `;
+    g.appendChild(pg);
+    partitionEls.push(pg);
+    partitionState.push({ owner: null, checkpoint: 0, epoch: 0, buffer: 0 });
+  }
+}
+
+function buildConsumers() {
+  const g = document.getElementById('consumers-group');
+  const positions = [
+    { x: 135, w: 260 },
+    { x: 430, w: 260 },
+    { x: 735, w: 200 }
+  ];
+  for (let i = 0; i < 3; i++) {
+    const cg = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    cg.setAttribute('transform', `translate(${positions[i].x}, 0)`);
+    cg.setAttribute('opacity', '0');
+    const w = positions[i].w;
+    cg.innerHTML = `
+      <rect class="c-bg" x="0" y="0" width="${w}" height="65" rx="10" fill="${COLORS.bg}" stroke="${CONSUMER_COLORS[i]}" stroke-width="2"/>
+      <circle class="c-heartbeat" cx="${w - 18}" cy="18" r="5" fill="${CONSUMER_COLORS[i]}" opacity="0.8"/>
+      <text class="c-name" x="${w/2}" y="24" text-anchor="middle" font-size="13" font-weight="600" fill="${CONSUMER_COLORS[i]}">${CONSUMER_NAMES[i]}</text>
+      <text class="c-processed" x="${w/2}" y="44" text-anchor="middle" font-size="11" fill="${COLORS.dim}">processed: 0</text>
+      <text class="c-partitions" x="${w/2}" y="58" text-anchor="middle" font-size="10" fill="${COLORS.grey}"></text>
+    `;
+    g.appendChild(cg);
+    consumerEls.push(cg);
+    consumerState.push({ processed: 0, alive: true });
+  }
+}
+
+function getPartitionCenter(pIdx) {
+  return { x: 115 + pIdx * (PW + PGAP) + PW / 2, y: 310 + PH / 2 };
+}
+
+function getConsumerTop(cIdx) {
+  const positions = [
+    { x: 135, w: 260 },
+    { x: 430, w: 260 },
+    { x: 735, w: 200 }
+  ];
+  return { x: positions[cIdx].x + positions[cIdx].w / 2, y: 530 };
+}
+
+function updatePartitionDisplay(pIdx) {
+  const el = partitionEls[pIdx];
+  const st = partitionState[pIdx];
+  el.querySelector('.p-owner').textContent = st.owner ? `owner: ${st.owner}` : 'unowned';
+  el.querySelector('.p-cp').textContent = `cp: ${st.checkpoint}`;
+  el.querySelector('.p-epoch').textContent = `epoch: ${st.epoch}`;
+}
+
+function updateConsumerDisplay(cIdx) {
+  const el = consumerEls[cIdx];
+  const st = consumerState[cIdx];
+  el.querySelector('.c-processed').textContent = `processed: ${st.processed}`;
+}
+
+function setPartitionColor(pIdx, color) {
+  const el = partitionEls[pIdx];
+  el.querySelector('.p-bg').setAttribute('stroke', color);
+  el.querySelector('.p-id').setAttribute('fill', color);
+}
+
+function clearConnectors() {
+  const g = document.getElementById('connectors');
+  g.innerHTML = '';
+  connectorEls = [];
+}
+
+function drawConnector(pIdx, cIdx, color) {
+  const g = document.getElementById('connectors');
+  const p = getPartitionCenter(pIdx);
+  const c = getConsumerTop(cIdx);
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('x1', p.x);
+  line.setAttribute('y1', p.y + PH / 2 + 2);
+  line.setAttribute('x2', c.x);
+  line.setAttribute('y2', c.y);
+  line.setAttribute('stroke', color);
+  line.setAttribute('stroke-width', '1.5');
+  line.setAttribute('stroke-dasharray', '5 4');
+  line.setAttribute('opacity', '0');
+  g.appendChild(line);
+  connectorEls.push(line);
+  return line;
+}
+
+function createMessageDot(color) {
+  const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  c.setAttribute('r', '5');
+  c.setAttribute('fill', color || '#A78BFA');
+  c.setAttribute('opacity', '0');
+  c.setAttribute('filter', 'url(#glow)');
+  document.getElementById('messages-layer').appendChild(c);
+  return c;
+}
+
+function setStatus(text) {
+  const el = document.getElementById('status-text');
+  el.textContent = text;
+  gsap.to(el, { opacity: 1, duration: 0.3 });
+}
+
+function updateProducerCount() {
+  document.getElementById('producer-count').textContent = `sent: ${producerSent}`;
+}
+
+// --- Build elements ---
+buildPartitions();
+buildConsumers();
+
+// --- GSAP Timeline ---
+const tl = gsap.timeline({
+  paused: true,
+  onUpdate: () => {
+    const prog = tl.progress();
+    document.getElementById('progress-fill').style.width = (prog * 100) + '%';
+    // Update scene buttons
+    const labels = ['scene1','scene2','scene3','scene4','scene5','scene6','scene7'];
+    const times = labels.map(l => tl.labels[l] || 0);
+    const cur = tl.time();
+    let activeScene = 0;
+    for (let i = times.length - 1; i >= 0; i--) {
+      if (cur >= times[i]) { activeScene = i; break; }
+    }
+    document.querySelectorAll('.scene-btns button').forEach((b, idx) => {
+      b.classList.toggle('scene-active', idx === activeScene);
+    });
+    const phaseLabels = [
+      'Scene 1: System Initialization',
+      'Scene 2: Consumers Join & Assignment',
+      'Scene 3: Producer Sends Messages',
+      'Scene 4: Consumption & Checkpointing',
+      'Scene 5: Consumer A Crashes',
+      'Scene 6: Rebalance & Recovery',
+      'Scene 7: Resumed Processing'
+    ];
+    document.getElementById('phase-label').textContent = phaseLabels[activeScene];
+  }
+});
+
+// ========== SCENE 1: System Initialization ==========
+tl.addLabel('scene1');
+
+// Title card
+tl.to('#title-card', { opacity: 1, duration: 1 });
+tl.to('#title-card', { opacity: 1, duration: 0.8 });
+tl.to('#title-card', { opacity: 0, duration: 0.6 });
+
+// Partition slots animate in
+partitionEls.forEach((el, i) => {
+  tl.to(el, { opacity: 1, duration: 0.2, ease: 'back.out(1.5)' }, `-=${i > 0 ? 0.1 : 0}`);
+});
+
+tl.call(() => setStatus('8 partition slots initialized — all unowned'), [], '+=0.2');
+
+// ========== SCENE 2: Consumers Join & Partition Assignment ==========
+tl.addLabel('scene2', '+=0.5');
+
+// Consumers slide in from below
+consumerEls.forEach((el, i) => {
+  gsap.set(el, { y: 80 });
+  tl.to(el, { opacity: 1, y: 0, duration: 0.5, ease: 'back.out(1.2)' }, `scene2+=${i * 0.3}`);
+});
+
+// Rebalance calculation status
+tl.call(() => setStatus('Rebalance: 8 partitions / 3 consumers = 3, 3, 2'), [], '+=0.3');
+
+// Assign partitions to consumers: A gets 0-2, B gets 3-5, C gets 6-7
+const assignments3 = [[0,1,2],[3,4,5],[6,7]];
+assignments3.forEach((pList, cIdx) => {
+  pList.forEach((pIdx, j) => {
+    tl.call(() => {
+      partitionState[pIdx].owner = CONSUMER_IDS[cIdx];
+      partitionState[pIdx].epoch = 1;
+      updatePartitionDisplay(pIdx);
+      setPartitionColor(pIdx, CONSUMER_COLORS[cIdx]);
+    }, [], `+=${j === 0 && cIdx === 0 ? 0.5 : 0.15}`);
+
+    // Flash effect
+    tl.to(partitionEls[pIdx].querySelector('.p-bg'), {
+      fill: CONSUMER_COLORS[cIdx], duration: 0.15
+    });
+    tl.to(partitionEls[pIdx].querySelector('.p-bg'), {
+      fill: COLORS.bg, duration: 0.3
+    });
+  });
+});
+
+// Update consumer partition labels
+tl.call(() => {
+  consumerEls[0].querySelector('.c-partitions').textContent = 'P0, P1, P2';
+  consumerEls[1].querySelector('.c-partitions').textContent = 'P3, P4, P5';
+  consumerEls[2].querySelector('.c-partitions').textContent = 'P6, P7';
+});
+
+// Draw connector lines
+tl.call(() => {
+  assignments3.forEach((pList, cIdx) => {
+    pList.forEach(pIdx => {
+      const line = drawConnector(pIdx, cIdx, CONSUMER_COLORS[cIdx]);
+      gsap.to(line, { opacity: 0.5, duration: 0.4 });
+    });
+  });
+});
+tl.call(() => setStatus('All partitions assigned — epoch=1'), [], '+=0.5');
+
+// Heartbeat pulse animation (continuous)
+tl.call(() => {
+  consumerEls.forEach((el, i) => {
+    const hb = el.querySelector('.c-heartbeat');
+    gsap.to(hb, {
+      scale: 1.4, opacity: 0.4, duration: 0.6,
+      repeat: -1, yoyo: true, ease: 'sine.inOut',
+      transformOrigin: 'center center',
+      attr: { r: 7 }
+    });
+  });
+});
+
+// ========== SCENE 3: Producer Sends Messages ==========
+tl.addLabel('scene3', '+=0.8');
+
+// Producer appears
+tl.to('#producer', { opacity: 1, duration: 0.4 }, 'scene3');
+tl.to('#hash-funnel', { opacity: 1, duration: 0.4 }, 'scene3+=0.1');
+tl.to('#prod-funnel-line', { opacity: 0.6, duration: 0.3 }, 'scene3+=0.2');
+
+tl.call(() => setStatus('Producer sending messages through hash partitioner'), [], '+=0.2');
+
+// Send 12 messages with routing animation
+const messageTargets = [0, 3, 6, 1, 4, 7, 2, 5, 0, 3, 1, 6];
+const msgColors = ['#A78BFA', '#C084FC', '#818CF8', '#A78BFA', '#C084FC', '#818CF8',
+                   '#A78BFA', '#C084FC', '#818CF8', '#A78BFA', '#C084FC', '#818CF8'];
+
+messageTargets.forEach((targetP, i) => {
+  tl.call(() => {
+    producerSent++;
+    updateProducerCount();
+    const dot = createMessageDot(msgColors[i % msgColors.length]);
+    const pCenter = getPartitionCenter(targetP);
+    const producerX = 180;
+    const producerY = 230;
+    const funnelX = 270;
+    const funnelY = 230;
+
+    gsap.set(dot, { attr: { cx: producerX, cy: producerY }, opacity: 0 });
+    const dotTl = gsap.timeline();
+    dotTl.to(dot, { opacity: 0.9, duration: 0.1 });
+    dotTl.to(dot, { attr: { cx: funnelX, cy: funnelY }, duration: 0.2, ease: 'power1.in' });
+    dotTl.to(dot, { attr: { cx: funnelX, cy: 260 }, duration: 0.1, ease: 'power1.in' });
+    dotTl.to(dot, { attr: { cx: pCenter.x, cy: pCenter.y - 10 }, duration: 0.25, ease: 'power2.out' });
+    dotTl.to(dot, { opacity: 0, scale: 0, duration: 0.15 });
+    dotTl.call(() => {
+      partitionState[targetP].buffer++;
+      const bufBar = partitionEls[targetP].querySelector('.p-buf-bar');
+      gsap.to(bufBar, { attr: { width: Math.min(partitionState[targetP].buffer * 15, PW - 10) }, duration: 0.2 });
+      dot.remove();
+    });
+  }, [], `+=${i === 0 ? 0.3 : 0.3}`);
+});
+
+tl.call(() => setStatus(`${producerSent} messages distributed across 8 partitions`), [], '+=1');
+
+// ========== SCENE 4: Consumption & Checkpointing ==========
+tl.addLabel('scene4', '+=0.8');
+tl.call(() => setStatus('Consumers pulling messages — epoch-fenced checkpointing'), [], 'scene4');
+
+// Animate consumption: messages flow from partitions to consumers
+function animateConsumption(pIdx, cIdx, count, labelOffset) {
+  for (let m = 0; m < count; m++) {
+    tl.call(() => {
+      const dot = createMessageDot(CONSUMER_COLORS[cIdx]);
+      const pCenter = getPartitionCenter(pIdx);
+      const cTop = getConsumerTop(cIdx);
+      gsap.set(dot, { attr: { cx: pCenter.x, cy: pCenter.y + PH / 2 }, opacity: 0 });
+      const dotTl = gsap.timeline();
+      dotTl.to(dot, { opacity: 0.8, duration: 0.08 });
+      dotTl.to(dot, { attr: { cx: cTop.x, cy: cTop.y }, duration: 0.3, ease: 'power2.in' });
+      dotTl.to(dot, { opacity: 0, duration: 0.1 });
+      dotTl.call(() => {
+        partitionState[pIdx].checkpoint++;
+        consumerState[cIdx].processed++;
+        updatePartitionDisplay(pIdx);
+        updateConsumerDisplay(cIdx);
+        dot.remove();
+      });
+    }, [], `+=${m === 0 && labelOffset === 0 ? 0.3 : 0.18}`);
+  }
+}
+
+// Consumer A processes from P0,P1,P2
+animateConsumption(0, 0, 3, 0);
+animateConsumption(1, 0, 2, 0);
+animateConsumption(2, 0, 2, 0);
+// Consumer B processes from P3,P4,P5
+animateConsumption(3, 1, 3, 0);
+animateConsumption(4, 1, 2, 0);
+animateConsumption(5, 1, 2, 0);
+// Consumer C processes from P6,P7
+animateConsumption(6, 2, 2, 0);
+animateConsumption(7, 2, 2, 0);
+
+// Epoch check badges
+tl.call(() => {
+  for (let p = 0; p < PARTITION_COUNT; p++) {
+    const el = partitionEls[p];
+    const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    badge.setAttribute('x', PW - 8);
+    badge.setAttribute('y', 14);
+    badge.setAttribute('text-anchor', 'end');
+    badge.setAttribute('font-size', '9');
+    badge.setAttribute('fill', '#10B981');
+    badge.setAttribute('opacity', '0');
+    badge.textContent = 'e1 \u2713';
+    el.appendChild(badge);
+    gsap.to(badge, { opacity: 1, duration: 0.3, delay: p * 0.08 });
+    gsap.to(badge, { opacity: 0, duration: 0.5, delay: 1.5 + p * 0.08 });
+  }
+}, [], '+=0.3');
+
+tl.call(() => setStatus('Checkpoints advancing — all epoch fences passing'), [], '+=0.5');
+tl.addPause('+=1.5');
+
+// ========== SCENE 5: Consumer A Crashes ==========
+tl.addLabel('scene5', '+=0.3');
+tl.call(() => setStatus('Consumer A heartbeat timeout — crash detected!'), [], 'scene5');
+
+// Stop heartbeat on A
+tl.call(() => {
+  const hb = consumerEls[0].querySelector('.c-heartbeat');
+  gsap.killTweensOf(hb);
+  gsap.to(hb, { fill: COLORS.crash, attr: { r: 5 }, opacity: 1, duration: 0.3 });
+  consumerState[0].alive = false;
+});
+
+// Flatline: heartbeat turns to dash
+tl.to(consumerEls[0].querySelector('.c-heartbeat'), { fill: COLORS.crash, duration: 0.3 }, '+=0.2');
+
+// Shake + red
+tl.to(consumerEls[0].querySelector('.c-bg'), { stroke: COLORS.crash, duration: 0.2 }, '+=0.1');
+tl.to(consumerEls[0], { x: -5, duration: 0.05, repeat: 5, yoyo: true }, '+=0.1');
+tl.to(consumerEls[0].querySelector('.c-name'), { fill: COLORS.crash, duration: 0.2 });
+
+// Fade out consumer A
+tl.to(consumerEls[0], { opacity: 0.2, duration: 0.6 }, '+=0.3');
+
+// Snap connector lines for partitions 0-2
+tl.call(() => {
+  connectorEls.forEach((line, idx) => {
+    if (idx < 3) { // First 3 connectors belong to consumer A
+      gsap.to(line, { opacity: 0, duration: 0.3 });
+    }
+  });
+});
+
+// Orphan partitions P0, P1, P2
+tl.call(() => {
+  [0, 1, 2].forEach(pIdx => {
+    const bg = partitionEls[pIdx].querySelector('.p-bg');
+    gsap.to(bg, { stroke: COLORS.crash, duration: 0.3 });
+    // Flash warning
+    gsap.to(bg, { fill: '#2D1515', duration: 0.3 });
+    gsap.to(bg, { fill: COLORS.bg, duration: 0.5, delay: 0.5 });
+    // Update label
+    partitionState[pIdx].owner = null;
+    const ownerText = partitionEls[pIdx].querySelector('.p-owner');
+    ownerText.textContent = 'ORPHANED';
+    ownerText.setAttribute('fill', COLORS.crash);
+  });
+}, [], '+=0.2');
+
+tl.call(() => setStatus('Zombie detection: Consumer A lease expired — P0, P1, P2 orphaned. Checkpoints preserved.'), [], '+=0.5');
+tl.addPause('+=1.5');
+
+// ========== SCENE 6: Rebalance & Recovery ==========
+tl.addLabel('scene6', '+=0.3');
+tl.call(() => setStatus('Rebalance triggered: 8 partitions / 2 consumers = 4, 4'), [], 'scene6');
+
+// Clear old connectors
+tl.call(() => clearConnectors(), [], '+=0.5');
+
+// Reassign: B gets 0-3, C gets 4-7
+const assignments2 = [[0,1,2,3],[4,5,6,7]];
+const rebalConsumers = [1, 2]; // B and C
+assignments2.forEach((pList, aIdx) => {
+  const cIdx = rebalConsumers[aIdx];
+  pList.forEach((pIdx, j) => {
+    tl.call(() => {
+      partitionState[pIdx].owner = CONSUMER_IDS[cIdx];
+      partitionState[pIdx].epoch++;
+      updatePartitionDisplay(pIdx);
+      setPartitionColor(pIdx, CONSUMER_COLORS[cIdx]);
+      const ownerText = partitionEls[pIdx].querySelector('.p-owner');
+      ownerText.setAttribute('fill', COLORS.dim);
+    }, [], `+=${j === 0 && aIdx === 0 ? 0.3 : 0.12}`);
+
+    tl.to(partitionEls[pIdx].querySelector('.p-bg'), {
+      fill: CONSUMER_COLORS[cIdx], duration: 0.15
+    });
+    tl.to(partitionEls[pIdx].querySelector('.p-bg'), {
+      fill: COLORS.bg, duration: 0.3
+    });
+  });
+});
+
+// Update consumer partition labels
+tl.call(() => {
+  consumerEls[1].querySelector('.c-partitions').textContent = 'P0, P1, P2, P3';
+  consumerEls[2].querySelector('.c-partitions').textContent = 'P4, P5, P6, P7';
+});
+
+// Draw new connectors
+tl.call(() => {
+  assignments2.forEach((pList, aIdx) => {
+    const cIdx = rebalConsumers[aIdx];
+    pList.forEach(pIdx => {
+      const line = drawConnector(pIdx, cIdx, CONSUMER_COLORS[cIdx]);
+      gsap.to(line, { opacity: 0.5, duration: 0.5 });
+    });
+  });
+}, [], '+=0.2');
+
+// Reposition consumers visually
+tl.call(() => {
+  // Consumer B now centered under 0-3
+  gsap.to(consumerEls[1], { x: -140, duration: 0.6, ease: 'power2.inOut' });
+  // Consumer C now centered under 4-7
+  gsap.to(consumerEls[2], { x: -80, duration: 0.6, ease: 'power2.inOut' });
+});
+
+tl.call(() => setStatus('Partitions rebalanced — checkpoints preserved at prior offsets'), [], '+=0.5');
+tl.addPause('+=1.2');
+
+// ========== SCENE 7: Resumed Processing ==========
+tl.addLabel('scene7', '+=0.3');
+tl.call(() => setStatus('Resuming from preserved checkpoints — no reprocessing needed'), [], 'scene7');
+
+// Highlight checkpoints on P0-P2 to show they're preserved
+tl.call(() => {
+  [0, 1, 2].forEach(pIdx => {
+    const cpEl = partitionEls[pIdx].querySelector('.p-cp');
+    gsap.to(cpEl, { fill: '#FCD34D', duration: 0.3 });
+    gsap.to(cpEl, { fill: COLORS.dim, duration: 0.8, delay: 1.5 });
+  });
+}, [], '+=0.3');
+
+// Add resume labels
+tl.call(() => {
+  [0, 1, 2].forEach(pIdx => {
+    const el = partitionEls[pIdx];
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', PW / 2);
+    label.setAttribute('y', PH + 14);
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('font-size', '9');
+    label.setAttribute('fill', '#FCD34D');
+    label.setAttribute('opacity', '0');
+    label.textContent = `resume @${partitionState[pIdx].checkpoint}`;
+    el.appendChild(label);
+    gsap.to(label, { opacity: 1, duration: 0.4, delay: pIdx * 0.15 });
+    gsap.to(label, { opacity: 0, duration: 0.6, delay: 2.5 });
+  });
+}, [], '+=0.2');
+
+// Resume consumption for B (P0-P3) and C (P4-P7)
+function animateResumedConsumption(pIdx, cIdx, count) {
+  for (let m = 0; m < count; m++) {
+    tl.call(() => {
+      const dot = createMessageDot(CONSUMER_COLORS[cIdx]);
+      const pCenter = getPartitionCenter(pIdx);
+      const cTop = getConsumerTop(cIdx);
+      // Adjust cTop for repositioned consumers
+      const adjustX = cIdx === 1 ? -140 : -80;
+      const positions = [
+        { x: 135, w: 260 },
+        { x: 430, w: 260 },
+        { x: 735, w: 200 }
+      ];
+      const cx = positions[cIdx].x + positions[cIdx].w / 2 + adjustX;
+
+      gsap.set(dot, { attr: { cx: pCenter.x, cy: pCenter.y + PH / 2 }, opacity: 0 });
+      const dotTl = gsap.timeline();
+      dotTl.to(dot, { opacity: 0.8, duration: 0.08 });
+      dotTl.to(dot, { attr: { cx: cx, cy: 530 }, duration: 0.3, ease: 'power2.in' });
+      dotTl.to(dot, { opacity: 0, duration: 0.1 });
+      dotTl.call(() => {
+        partitionState[pIdx].checkpoint++;
+        consumerState[cIdx].processed++;
+        updatePartitionDisplay(pIdx);
+        updateConsumerDisplay(cIdx);
+        dot.remove();
+      });
+    }, [], `+=${m === 0 ? 0.15 : 0.12}`);
+  }
+}
+
+// B processes from P0,P1,P2,P3 — continuing from checkpoints
+animateResumedConsumption(0, 1, 2);
+animateResumedConsumption(1, 1, 2);
+animateResumedConsumption(2, 1, 2);
+animateResumedConsumption(3, 1, 2);
+// C processes from P4,P5,P6,P7
+animateResumedConsumption(4, 2, 2);
+animateResumedConsumption(5, 2, 2);
+animateResumedConsumption(6, 2, 2);
+animateResumedConsumption(7, 2, 2);
+
+tl.call(() => setStatus('All messages processed from correct offsets — zero loss, zero duplication'), [], '+=0.5');
+
+// Final totals
+tl.call(() => {
+  let totalProcessed = 0;
+  consumerState.forEach(c => totalProcessed += c.processed);
+  setStatus(`Complete: ${totalProcessed} messages processed across all consumers`);
+}, [], '+=0.5');
+
+// Fade everything out and show end card
+tl.to(['#partitions-group', '#consumers-group', '#connectors', '#producer', '#hash-funnel',
+       '#prod-funnel-line', '#messages-layer', '#status-bar'], {
+  opacity: 0, duration: 1
+}, '+=1');
+
+tl.to('#end-card', { opacity: 1, duration: 1 }, '-=0.3');
+
+// ========== Controls ==========
+const btnPlay = document.getElementById('btn-play');
+const btnRestart = document.getElementById('btn-restart');
+const speedSelect = document.getElementById('speed-select');
+let isPlaying = false;
+
+function play() {
+  tl.play();
+  isPlaying = true;
+  btnPlay.innerHTML = '&#9646;&#9646; Pause';
+  btnPlay.classList.add('active');
+}
+
+function pause() {
+  tl.pause();
+  isPlaying = false;
+  btnPlay.innerHTML = '&#9654; Play';
+  btnPlay.classList.remove('active');
+}
+
+btnPlay.addEventListener('click', () => {
+  if (isPlaying) pause(); else play();
+});
+
+btnRestart.addEventListener('click', () => {
+  // Reset state
+  producerSent = 0;
+  updateProducerCount();
+  partitionState.forEach((ps, i) => {
+    ps.owner = null; ps.checkpoint = 0; ps.epoch = 0; ps.buffer = 0;
+    updatePartitionDisplay(i);
+    setPartitionColor(i, COLORS.border);
+    const bufBar = partitionEls[i].querySelector('.p-buf-bar');
+    bufBar.setAttribute('width', '0');
+  });
+  consumerState.forEach((cs, i) => {
+    cs.processed = 0; cs.alive = true;
+    updateConsumerDisplay(i);
+  });
+  clearConnectors();
+  document.getElementById('messages-layer').innerHTML = '';
+
+  // Reset visual transforms
+  consumerEls.forEach(el => {
+    gsap.set(el, { x: 0, y: 80, opacity: 0 });
+    const bg = el.querySelector('.c-bg');
+    const name = el.querySelector('.c-name');
+    const hb = el.querySelector('.c-heartbeat');
+    gsap.killTweensOf(hb);
+    gsap.set(hb, { attr: { r: 5 } });
+  });
+  // Reset consumer A stroke back to blue
+  consumerEls[0].querySelector('.c-bg').setAttribute('stroke', COLORS.A);
+  consumerEls[0].querySelector('.c-name').setAttribute('fill', COLORS.A);
+  consumerEls[0].querySelector('.c-heartbeat').setAttribute('fill', COLORS.A);
+
+  partitionEls.forEach(el => {
+    const bg = el.querySelector('.p-bg');
+    bg.setAttribute('fill', COLORS.bg);
+    const ownerText = el.querySelector('.p-owner');
+    ownerText.setAttribute('fill', COLORS.grey);
+  });
+
+  // Reset group opacities
+  gsap.set(['#partitions-group', '#consumers-group', '#connectors', '#producer', '#hash-funnel',
+            '#prod-funnel-line', '#messages-layer', '#status-bar'], { opacity: 1 });
+  gsap.set('#end-card', { opacity: 0 });
+  gsap.set('#status-text', { opacity: 0 });
+
+  tl.restart();
+  play();
+});
+
+speedSelect.addEventListener('change', () => {
+  tl.timeScale(parseFloat(speedSelect.value));
+});
+
+document.querySelectorAll('.scene-btns button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const scene = btn.dataset.scene;
+    if (tl.labels[scene] !== undefined) {
+      tl.seek(scene);
+      play();
+    }
+  });
+});
+
+// Progress bar seeking
+document.getElementById('progress-bar').addEventListener('click', (e) => {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const pct = (e.clientX - rect.left) / rect.width;
+  tl.progress(pct);
+  if (!isPlaying) play();
+});
+
+// Auto-play
+setTimeout(() => play(), 500);
+</script>
+</body>
+</html>
