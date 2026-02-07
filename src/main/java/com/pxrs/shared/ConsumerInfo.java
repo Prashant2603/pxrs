@@ -1,4 +1,4 @@
-package com.pxrs.model;
+package com.pxrs.shared;
 
 public class ConsumerInfo {
 

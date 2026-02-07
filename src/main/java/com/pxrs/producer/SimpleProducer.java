@@ -1,7 +1,8 @@
 package com.pxrs.producer;
 
-import com.pxrs.model.Message;
-import com.pxrs.partition.PartitionStrategy;
+import com.pxrs.shared.Message;
+import com.pxrs.shared.PartitionQueues;
+import com.pxrs.shared.PartitionStrategy;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -12,11 +13,13 @@ public class SimpleProducer implements Producer {
 
     private final PartitionStrategy strategy;
     private final int numPartitions;
+    private final PartitionQueues partitionQueues;
     private final ConcurrentHashMap<Integer, List<Message>> partitionBuffers = new ConcurrentHashMap<>();
 
-    public SimpleProducer(PartitionStrategy strategy, int numPartitions) {
+    public SimpleProducer(PartitionStrategy strategy, int numPartitions, PartitionQueues partitionQueues) {
         this.strategy = strategy;
         this.numPartitions = numPartitions;
+        this.partitionQueues = partitionQueues;
         for (int i = 0; i < numPartitions; i++) {
             partitionBuffers.put(i, new ArrayList<>());
         }
@@ -34,6 +37,7 @@ public class SimpleProducer implements Producer {
                 System.currentTimeMillis()
         );
         buffer.add(msg);
+        partitionQueues.put(partitionId, msg);
     }
 
     @Override

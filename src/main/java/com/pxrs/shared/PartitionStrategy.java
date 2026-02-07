@@ -1,4 +1,4 @@
-package com.pxrs.partition;
+package com.pxrs.shared;
 
 public interface PartitionStrategy {
 

@@ -38,6 +38,8 @@ PXRS introduces **virtual partitioning** with **per-partition, per-consumer chec
 - Each partition has an independent owner, checkpoint offset, and version epoch
 - Consumers claim partitions atomically (CAS) and advance checkpoints with epoch fencing
 - Dead consumers are detected automatically (lease expiry or heartbeat timeout) and their partitions are reclaimed and redistributed
+- **No polling** — consumers block on `BlockingQueue.take()` for instant message delivery
+- **Push-based assignments** — the coordinator diffs partition ownership and pushes assign/revoke events to consumer engines
 
 ---
 
@@ -53,11 +55,11 @@ graph TB
         PS[ModuloPartitionStrategy]
     end
 
-    subgraph "Message Buffers (per partition)"
-        B0[Partition 0]
-        B1[Partition 1]
-        B2[Partition 2]
-        BN[Partition N]
+    subgraph "Shared Infrastructure"
+        PQ[PartitionQueues<br/>BlockingQueue per partition]
+        B0[Partition 0 Buffer]
+        B1[Partition 1 Buffer]
+        BN[Partition N Buffer]
     end
 
     subgraph Coordination
@@ -71,31 +73,43 @@ graph TB
         ET[EtcdRegistryStore]
     end
 
+    subgraph "Consumer Engines (thread per partition)"
+        EA[ConsumerEngine A]
+        EB[ConsumerEngine B]
+        EC[ConsumerEngine C]
+    end
+
     subgraph Consumers
-        CA[Consumer A]
-        CB[Consumer B]
-        CX[Consumer C]
+        CA[SimpleConsumer A<br/>subscribe blocks on take]
+        CB[SimpleConsumer B<br/>subscribe blocks on take]
+        CX[SimpleConsumer C<br/>subscribe blocks on take]
     end
 
     P -->|"send(key, payload)"| PS
     PS -->|partitionId| B0
     PS -->|partitionId| B1
-    PS -->|partitionId| B2
     PS -->|partitionId| BN
+    P -->|"put(msg)"| PQ
 
-    CC -->|"periodic rebalance"| PM
+    CC -->|"rebalance + pushAssignments"| PM
+    CC -->|"onPartitionAssigned/Revoked"| EA
+    CC -->|"onPartitionAssigned/Revoked"| EB
+    CC -->|"onPartitionAssigned/Revoked"| EC
     PM -->|"claim / release / checkpoint"| RS
     RS --- IM
     RS --- ET
 
-    CA -->|"poll owned partitions"| B0
-    CA -->|"poll owned partitions"| B1
-    CB -->|"poll owned partitions"| B2
-    CX -->|"poll owned partitions"| BN
+    EA -->|"spawn thread"| CA
+    EB -->|"spawn thread"| CB
+    EC -->|"spawn thread"| CX
 
-    CA -->|"updateCheckpoint"| RS
-    CB -->|"updateCheckpoint"| RS
-    CX -->|"updateCheckpoint"| RS
+    CA -->|"take()"| PQ
+    CB -->|"take()"| PQ
+    CX -->|"take()"| PQ
+
+    CA -->|"checkpoint"| RS
+    CB -->|"checkpoint"| RS
+    CX -->|"checkpoint"| RS
 ```
 
 ---
@@ -113,6 +127,16 @@ A logical bucket to which messages are assigned. Each partition has independent 
 | `lastCheckpoint` | Offset of the last successfully processed message |
 | `versionEpoch` | Monotonically increasing counter, bumped on every claim/release |
 | `lastHeartbeat` | Timestamp of last activity (for zombie detection) |
+
+### PartitionQueues
+
+A shared `Map<Integer, BlockingQueue<Message>>` that bridges producers and consumers. The producer pushes to the queue on `send()`, and consumers block on `take()` — eliminating polling entirely.
+
+### ConsumerEngine
+
+Manages the thread-per-partition lifecycle for a single consumer:
+- `onPartitionAssigned(partitionId)` — reads checkpoint from store, spawns a daemon thread that calls `consumer.subscribe(partitionId, checkpoint)`
+- `onPartitionRevoked(partitionId)` — calls `consumer.unsubscribe()`, interrupts the thread, joins with timeout
 
 ### Epoch Fencing
 
@@ -134,45 +158,49 @@ sequenceDiagram
     participant P as SimpleProducer
     participant S as PartitionStrategy
     participant B as Partition Buffer
+    participant PQ as PartitionQueues
 
     App->>P: send("acct-123", payload)
     P->>S: assignPartition("acct-123", 8)
     S-->>P: partitionId = 3
     P->>P: Create Message(id=UUID, key, partitionId, payload, timestamp)
     P->>B: Append to partition-3 buffer at offset N
+    P->>PQ: put(3, msg) → consumers take() instantly
 ```
 
-### Consumer Poll & Checkpoint Flow
+### Consumer Subscribe Flow
 
 ```mermaid
 sequenceDiagram
+    participant CE as ConsumerEngine
     participant C as SimpleConsumer
     participant RS as RegistryStore
     participant P as SimpleProducer
+    participant PQ as PartitionQueues
 
-    loop Every 100ms while running
-        C->>RS: getPartitionsOwnedBy(consumerId)
-        RS-->>C: [PartitionState(id=0, epoch=5), PartitionState(id=1, epoch=3)]
+    Note over CE: onPartitionAssigned(partitionId=0)
+    CE->>RS: getCheckpoint(0) → offset=42
+    CE->>CE: Spawn thread
 
-        loop For each owned partition
-            C->>RS: getCheckpoint(partitionId)
-            RS-->>C: offset = 42
-
-            loop While messages available
-                C->>P: getNextMessage(partitionId, offset)
-                P-->>C: Message
-                C->>C: processMessage(msg)
-                C->>RS: updateCheckpoint(partitionId, consumerId, offset+1, epoch=5)
-                alt Epoch matches
-                    RS-->>C: true (checkpoint saved)
-                else Epoch changed (lost ownership)
-                    RS-->>C: false
-                    C->>C: Break loop — stop processing this partition
-                end
-            end
+    Note over C: Phase 1: Replay historical messages
+    loop While messages in buffer
+        C->>P: getNextMessage(0, offset)
+        P-->>C: Message
+        C->>C: consumeMessage(msg)
+        C->>RS: checkpoint(0, offset+1) [epoch-fenced]
+        alt Epoch matches
+            RS-->>C: true
+        else Epoch mismatch
+            RS-->>C: false → mark inactive, return
         end
+    end
 
-        C->>RS: updateHeartbeat(consumerId)
+    Note over C: Phase 2: Live consumption (blocking)
+    loop While active
+        C->>PQ: take(0) → blocks until message available
+        PQ-->>C: Message (instant)
+        C->>C: consumeMessage(msg)
+        C->>RS: checkpoint(0, offset+1) [epoch-fenced]
     end
 ```
 
@@ -182,15 +210,15 @@ sequenceDiagram
 flowchart LR
     subgraph "1. Produce"
         A["send('acct-42', data)"] --> B["hash('acct-42') % 8 = 3"]
-        B --> C["Append to Partition 3<br/>offset = N"]
+        B --> C["Append to buffer + put to queue"]
     end
 
     subgraph "2. Coordinate"
-        D["Rebalance"] --> E["Consumer-A owns [0,1,2]<br/>Consumer-B owns [3,4,5]<br/>Consumer-C owns [6,7]"]
+        D["Rebalance + pushAssignments"] --> E["Consumer-A engines [0,1,2]<br/>Consumer-B engines [3,4,5]<br/>Consumer-C engines [6,7]"]
     end
 
     subgraph "3. Consume"
-        F["Consumer-B polls partition 3"] --> G["Read from offset N"]
+        F["Consumer-B thread<br/>take() from partition 3"] --> G["Instant delivery"]
         G --> H["Process message"]
         H --> I["Checkpoint offset N+1<br/>(epoch fenced)"]
     end
@@ -219,10 +247,11 @@ flowchart TD
     D --> E["Compute fair assignment<br/>base = P / C, remainder = P % C"]
     E --> F["Release partitions not in<br/>desired assignment"]
     F --> G["Claim unowned partitions<br/>per desired assignment (CAS)"]
-    G --> H[Rebalance complete]
+    G --> H["pushAssignments():<br/>diff vs last, revoke/assign"]
+    H --> I[Engines spawn/stop threads]
 
     style A fill:#e1f5fe
-    style H fill:#e8f5e9
+    style I fill:#e8f5e9
 ```
 
 ### Rebalance Examples
@@ -253,25 +282,25 @@ graph LR
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Registering: start()
-    Registering --> Polling: registerConsumer() + spawn thread
+    [*] --> Registering: coordinator.addConsumer(engine)
+    Registering --> WaitingForAssignment: registerConsumer() in store
 
-    state Polling {
-        [*] --> QueryPartitions
-        QueryPartitions --> ConsumePartitions: getPartitionsOwnedBy()
-        ConsumePartitions --> Heartbeat: process all available messages
-        Heartbeat --> QueryPartitions: sleep 100ms
+    state "Active (per partition)" as Active {
+        [*] --> Replay: onPartitionAssigned → spawn thread
+        Replay --> LiveConsumption: historical replay complete
+        LiveConsumption --> LiveConsumption: take() → process → checkpoint
     }
 
-    Polling --> Stopping: stop()
-    Stopping --> [*]: releaseAllPartitions() + deregister
+    WaitingForAssignment --> Active: triggerRebalance() → pushAssignments()
 
-    note right of Polling
-        Each iteration:
-        1. Query owned partitions
-        2. For each partition: read → process → checkpoint
-        3. Update heartbeat
-        4. Sleep 100ms
+    Active --> Stopping: coordinator.removeConsumer(engine)
+    Active --> Stopping: onPartitionRevoked (rebalance)
+    Stopping --> [*]: unsubscribe → interrupt thread → releasePartitions → deregister
+
+    note right of Active
+        Each partition runs on its own thread.
+        subscribe() blocks on take() — no polling.
+        Epoch-fenced checkpoints on every message.
     end note
 ```
 
@@ -289,7 +318,7 @@ sequenceDiagram
     participant B as Consumer B (new owner)
 
     Note over A,RS: Consumer A owns partition 0 (epoch=5)
-    A->>RS: updateCheckpoint(0, "A", offset=10, epoch=5)
+    A->>RS: checkpoint(0, offset=10, epoch=5)
     RS-->>A: true
 
     Note over PM: Rebalance triggered — A lost partition 0
@@ -303,11 +332,11 @@ sequenceDiagram
     B->>B: Resume processing from offset 10
 
     Note over A: A still running (stale reference, epoch=5)
-    A->>RS: updateCheckpoint(0, "A", offset=11, epoch=5)
+    A->>RS: checkpoint(0, offset=11, epoch=5)
     RS-->>A: false (epoch mismatch: 5 ≠ 7)
-    Note over A: A detects lost ownership → breaks poll loop
+    Note over A: A marks partition inactive → subscribe returns
 
-    B->>RS: updateCheckpoint(0, "B", offset=11, epoch=7)
+    B->>RS: checkpoint(0, offset=11, epoch=7)
     RS-->>B: true
 ```
 
@@ -323,9 +352,9 @@ flowchart TD
     B --> C["PartitionManager.reclaimExpiredPartitions()"]
     C --> D["store.getExpiredPartitions()<br/>detects stale heartbeat OR<br/>deregistered consumer"]
     D --> E["releasePartition(id, 'A')<br/>epoch bumped, owner cleared"]
-    E --> F["Next rebalance()"]
-    F --> G["Remaining consumers<br/>claim orphaned partitions"]
-    G --> H["New owner resumes from<br/>last checkpoint offset"]
+    E --> F["Next rebalance() + pushAssignments()"]
+    F --> G["Remaining engines<br/>get onPartitionAssigned()"]
+    G --> H["New threads resume from<br/>last checkpoint offset"]
 
     style A fill:#ffcdd2
     style H fill:#e8f5e9
@@ -340,9 +369,9 @@ flowchart TD
     C --> D["Consumer key auto-deleted<br/>/pxrs/consumers/A"]
     D --> E["getExpiredPartitions()<br/>owner 'A' not in activeConsumers"]
     E --> F["releasePartition(id, 'A')<br/>epoch bumped, owner cleared"]
-    F --> G["Next rebalance()"]
+    F --> G["Next rebalance() + pushAssignments()"]
     G --> H["CAS claim by new consumer<br/>Txn: IF modRevision matches"]
-    H --> I["New owner resumes from<br/>last checkpoint offset"]
+    H --> I["New engine thread resumes from<br/>last checkpoint offset"]
 
     style A fill:#ffcdd2
     style I fill:#e8f5e9
@@ -445,34 +474,34 @@ pxrs/
 ├── pom.xml
 └── src/
     ├── main/java/com/pxrs/
-    │   ├── config/
-    │   │   └── PxrsConfig.java              # Centralized configuration (builder pattern)
-    │   ├── model/
+    │   ├── shared/
+    │   │   ├── PxrsConfig.java              # Centralized configuration (builder pattern)
     │   │   ├── Message.java                 # Immutable message record
     │   │   ├── PartitionState.java          # Partition ownership + checkpoint state
-    │   │   └── ConsumerInfo.java            # Consumer registration info
-    │   ├── partition/
+    │   │   ├── ConsumerInfo.java            # Consumer registration info
     │   │   ├── PartitionStrategy.java       # Interface: key → partitionId
-    │   │   └── ModuloPartitionStrategy.java # Default: abs(hashCode % N)
+    │   │   ├── ModuloPartitionStrategy.java # Default: abs(hashCode % N)
+    │   │   └── PartitionQueues.java         # BlockingQueue per partition (producer→consumer bridge)
     │   ├── store/
     │   │   ├── RegistryStore.java           # Interface — the swappable coordination layer
     │   │   ├── EtcdRegistryStore.java       # Production: etcd Txn CAS + lease TTL
     │   │   └── InMemoryRegistryStore.java   # Testing: ConcurrentHashMap + synchronized
     │   ├── producer/
     │   │   ├── Producer.java                # Interface: send, getNextMessage, getLatestOffset
-    │   │   └── SimpleProducer.java          # In-memory partitioned message buffer
+    │   │   └── SimpleProducer.java          # In-memory buffer + PartitionQueues push
     │   ├── consumer/
-    │   │   ├── Consumer.java                # Interface: start, stop, processMessage
-    │   │   └── SimpleConsumer.java          # Poll loop with epoch-fenced checkpointing
+    │   │   ├── Consumer.java                # Interface: subscribe, unsubscribe, checkpoint
+    │   │   ├── SimpleConsumer.java          # Blocking subscribe with replay + live take()
+    │   │   └── ConsumerEngine.java          # Thread-per-partition lifecycle manager
     │   ├── coordination/
     │   │   ├── PartitionManager.java        # Fair-share assignment + expired reclamation
-    │   │   └── ConsumerCoordinator.java     # Scheduled rebalance orchestrator
+    │   │   └── ConsumerCoordinator.java     # Push-based rebalance orchestrator with engine management
     │   └── demo/
     │       └── PxrsDemo.java                # Full end-to-end demonstration
     └── test/java/com/pxrs/
         ├── store/
         │   └── InMemoryRegistryStoreTest.java   # 16 tests: CAS races, epoch fencing, expiry
-        ├── partition/
+        ├── shared/
         │   └── ModuloPartitionStrategyTest.java # 5 tests: range, determinism, distribution
         └── coordination/
             └── PartitionManagerTest.java        # 12 tests: fair-share, rebalancing, reclaim
@@ -508,14 +537,16 @@ mvn exec:java -Dexec.mainClass=com.pxrs.demo.PxrsDemo
 
 The demo will:
 
-1. Create 8 partitions and start 3 consumers (A, B, C)
-2. Assign partitions fairly: A gets [0,1,2], B gets [3,4,5], C gets [6,7]
-3. Send 100 messages with keys `account-0` through `account-99`
-4. Wait for consumers to process and print per-consumer stats
-5. Stop Consumer A (simulating a crash)
-6. Trigger rebalance — B and C pick up A's orphaned partitions
-7. Send 50 more messages and verify resumed processing from checkpoints
-8. Print final stats and shut down
+1. Create 8 partitions, a `PartitionQueues` bridge, and a `SimpleProducer`
+2. Create 3 consumers (A, B, C) each wrapped in a `ConsumerEngine`, registered via `coordinator.addConsumer()`
+3. Trigger rebalance — assigns partitions fairly: A gets [0,1,2], B gets [3,4,5], C gets [6,7]
+4. Engines spawn threads → each calls `consumer.subscribe()` which blocks on `take()`
+5. Send 100 messages — consumers receive them instantly via `PartitionQueues`
+6. Print per-consumer stats and checkpoint positions
+7. Remove Consumer A via `coordinator.removeConsumer()` (simulating crash)
+8. Trigger rebalance — B and C pick up A's orphaned partitions, new threads spawned
+9. Send 50 more messages and verify resumed processing from checkpoints
+10. Print final stats and shut down
 
 ### Run Demo with Custom Partition Count
 

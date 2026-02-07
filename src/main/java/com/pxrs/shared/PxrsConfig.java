@@ -1,4 +1,4 @@
-package com.pxrs.config;
+package com.pxrs.shared;
 
 public class PxrsConfig {
 

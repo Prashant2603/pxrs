@@ -1,6 +1,6 @@
 package com.pxrs.producer;
 
-import com.pxrs.model.Message;
+import com.pxrs.shared.Message;
 
 public interface Producer {
 

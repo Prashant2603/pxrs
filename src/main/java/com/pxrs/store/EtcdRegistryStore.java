@@ -1,8 +1,8 @@
 package com.pxrs.store;
 
-import com.pxrs.config.PxrsConfig;
-import com.pxrs.model.ConsumerInfo;
-import com.pxrs.model.PartitionState;
+import com.pxrs.shared.PxrsConfig;
+import com.pxrs.shared.ConsumerInfo;
+import com.pxrs.shared.PartitionState;
 
 import io.etcd.jetcd.ByteSequence;
 import io.etcd.jetcd.Client;

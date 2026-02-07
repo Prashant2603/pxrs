@@ -1,6 +1,6 @@
 package com.pxrs.coordination;
 
-import com.pxrs.model.PartitionState;
+import com.pxrs.shared.PartitionState;
 import com.pxrs.store.InMemoryRegistryStore;
 import org.junit.After;
 import org.junit.Before;

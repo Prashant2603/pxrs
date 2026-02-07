@@ -1,7 +1,7 @@
 package com.pxrs.store;
 
-import com.pxrs.model.ConsumerInfo;
-import com.pxrs.model.PartitionState;
+import com.pxrs.shared.ConsumerInfo;
+import com.pxrs.shared.PartitionState;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;

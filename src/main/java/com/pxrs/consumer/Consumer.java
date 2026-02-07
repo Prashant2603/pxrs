@@ -1,14 +1,12 @@
 package com.pxrs.consumer;
 
-import com.pxrs.model.Message;
-
 public interface Consumer {
 
     String getConsumerId();
 
-    void start();
+    void subscribe(int partitionId, long checkpoint);
 
-    void stop();
+    void unsubscribe(int partitionId);
 
-    void processMessage(Message message);
+    void checkpoint(int partitionId, long offset);
 }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PXRS — Animated Flow Visualization</title>
+<title>PXRS — Animated Architecture Flow</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/MotionPathPlugin.min.js"></script>
 <style>
@@ -83,7 +83,7 @@
     width: 100%;
     height: 100%;
     max-width: 1200px;
-    max-height: 750px;
+    max-height: 780px;
   }
   #phase-label {
     font-size: 14px;
@@ -119,7 +119,7 @@
 </div>
 
 <div id="svg-container">
-<svg id="main" viewBox="0 0 1100 700" xmlns="http://www.w3.org/2000/svg">
+<svg id="main" viewBox="0 0 1100 720" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <filter id="glow">
       <feGaussianBlur stdDeviation="3" result="blur"/>
@@ -139,59 +139,110 @@
     </linearGradient>
   </defs>
 
+  <!-- Layer backgrounds -->
+  <g id="layer-bgs" opacity="0">
+    <!-- Producer layer -->
+    <rect x="10" y="5" width="1080" height="85" rx="8" fill="#111827" opacity="0.5"/>
+    <text x="22" y="22" font-size="10" fill="#475569" font-weight="600" letter-spacing="1.5">PRODUCER</text>
+
+    <!-- Shared / PartitionQueues layer -->
+    <rect x="10" y="97" width="1080" height="195" rx="8" fill="#0F1629" opacity="0.5"/>
+    <text x="22" y="114" font-size="10" fill="#475569" font-weight="600" letter-spacing="1.5">SHARED &middot; PARTITION QUEUES</text>
+
+    <!-- Consumer layer -->
+    <rect x="10" y="299" width="1080" height="150" rx="8" fill="#111827" opacity="0.5"/>
+    <text x="22" y="316" font-size="10" fill="#475569" font-weight="600" letter-spacing="1.5">CONSUMER ENGINES</text>
+
+    <!-- Coordination + Store layer -->
+    <rect x="10" y="456" width="1080" height="100" rx="8" fill="#0F1629" opacity="0.5"/>
+    <text x="22" y="473" font-size="10" fill="#475569" font-weight="600" letter-spacing="1.5">COORDINATION &middot; STORE</text>
+  </g>
+
   <!-- Title card -->
   <g id="title-card" opacity="0">
-    <text x="550" y="300" text-anchor="middle" font-size="36" font-weight="700" fill="#F1F5F9">PXRS</text>
+    <text x="550" y="300" text-anchor="middle" font-size="38" font-weight="700" fill="#F1F5F9">PXRS</text>
     <text x="550" y="340" text-anchor="middle" font-size="16" fill="#94A3B8">Partitioned Registry Store</text>
-    <text x="550" y="370" text-anchor="middle" font-size="13" fill="#64748B">Virtual Partitioning &bull; Epoch Fencing &bull; Crash Recovery</text>
+    <text x="550" y="370" text-anchor="middle" font-size="13" fill="#64748B">BlockingQueue &bull; Push Assignments &bull; Epoch Fencing &bull; Crash Recovery</text>
   </g>
 
   <!-- Producer -->
-  <g id="producer" opacity="0" transform="translate(60, 200)">
-    <rect x="0" y="0" width="120" height="60" rx="10" fill="#1E293B" stroke="#8B5CF6" stroke-width="2"/>
-    <text x="60" y="28" text-anchor="middle" font-size="12" fill="#A78BFA" font-weight="600">PRODUCER</text>
-    <text x="60" y="45" text-anchor="middle" font-size="11" fill="#94A3B8" id="producer-count">sent: 0</text>
+  <g id="producer" opacity="0" transform="translate(60, 22)">
+    <rect x="0" y="0" width="130" height="55" rx="10" fill="#1E293B" stroke="#8B5CF6" stroke-width="2"/>
+    <text x="65" y="23" text-anchor="middle" font-size="12" fill="#A78BFA" font-weight="600">SimpleProducer</text>
+    <text x="65" y="40" text-anchor="middle" font-size="11" fill="#94A3B8" id="producer-count">sent: 0</text>
   </g>
 
   <!-- Hash funnel -->
-  <g id="hash-funnel" opacity="0" transform="translate(230, 200)">
-    <path d="M0,0 L80,0 L60,60 L20,60 Z" fill="#1E293B" stroke="#6366F1" stroke-width="1.5"/>
-    <text x="40" y="35" text-anchor="middle" font-size="10" fill="#818CF8">hash % 8</text>
+  <g id="hash-funnel" opacity="0" transform="translate(240, 22)">
+    <path d="M0,0 L80,0 L60,55 L20,55 Z" fill="#1E293B" stroke="#6366F1" stroke-width="1.5"/>
+    <text x="40" y="32" text-anchor="middle" font-size="10" fill="#818CF8">hash % 8</text>
   </g>
 
   <!-- Connector: producer to funnel -->
-  <line id="prod-funnel-line" x1="180" y1="230" x2="230" y2="230" stroke="#475569" stroke-width="1.5" stroke-dasharray="4 3" opacity="0"/>
+  <line id="prod-funnel-line" x1="190" y1="50" x2="240" y2="50" stroke="#475569" stroke-width="1.5" stroke-dasharray="4 3" opacity="0"/>
 
-  <!-- Partition row -->
-  <g id="partitions-group" transform="translate(115, 310)">
-  </g>
+  <!-- Funnel to partitions lines (vertical spread) -->
+  <g id="funnel-spread" opacity="0"></g>
+
+  <!-- Partitions group -->
+  <g id="partitions-group" transform="translate(100, 125)"></g>
 
   <!-- Consumers group -->
-  <g id="consumers-group" transform="translate(0, 530)">
+  <g id="consumers-group" transform="translate(0, 320)"></g>
+
+  <!-- Coordination layer -->
+  <g id="coord-layer" opacity="0">
+    <g id="coordinator-box" transform="translate(180, 468)">
+      <rect x="0" y="0" width="220" height="70" rx="10" fill="#1E293B" stroke="#6366F1" stroke-width="1.5"/>
+      <text x="110" y="24" text-anchor="middle" font-size="11" fill="#818CF8" font-weight="600">ConsumerCoordinator</text>
+      <text x="110" y="42" text-anchor="middle" font-size="10" fill="#94A3B8">rebalance + pushAssignments</text>
+      <text x="110" y="58" text-anchor="middle" font-size="10" fill="#64748B" id="coord-status">idle</text>
+    </g>
+    <g id="pm-box" transform="translate(440, 468)">
+      <rect x="0" y="0" width="200" height="70" rx="10" fill="#1E293B" stroke="#6366F1" stroke-width="1.5"/>
+      <text x="100" y="24" text-anchor="middle" font-size="11" fill="#818CF8" font-weight="600">PartitionManager</text>
+      <text x="100" y="42" text-anchor="middle" font-size="10" fill="#94A3B8">fair-share rebalance</text>
+      <text x="100" y="58" text-anchor="middle" font-size="10" fill="#64748B" id="pm-status">8 partitions</text>
+    </g>
+    <g id="store-box" transform="translate(680, 468)">
+      <rect x="0" y="0" width="220" height="70" rx="10" fill="#1E293B" stroke="#059669" stroke-width="1.5"/>
+      <text x="110" y="24" text-anchor="middle" font-size="11" fill="#10B981" font-weight="600">RegistryStore</text>
+      <text x="110" y="42" text-anchor="middle" font-size="10" fill="#94A3B8">InMemoryRegistryStore</text>
+      <text x="110" y="58" text-anchor="middle" font-size="10" fill="#64748B" id="store-status">initialized</text>
+    </g>
+    <!-- Arrows between coord boxes -->
+    <line x1="400" y1="503" x2="440" y2="503" stroke="#475569" stroke-width="1" stroke-dasharray="4 3"/>
+    <line x1="640" y1="503" x2="680" y2="503" stroke="#475569" stroke-width="1" stroke-dasharray="4 3"/>
   </g>
 
-  <!-- Connector lines group -->
+  <!-- Push-assignment arrows (coordinator to engines) -->
+  <g id="push-arrows" opacity="0"></g>
+
+  <!-- Connector lines (partitions to consumers) -->
   <g id="connectors"></g>
 
   <!-- Messages layer -->
   <g id="messages-layer"></g>
 
   <!-- Status bar -->
-  <g id="status-bar" transform="translate(550, 670)">
+  <g id="status-bar" transform="translate(550, 580)">
     <text id="status-text" x="0" y="0" text-anchor="middle" font-size="13" fill="#64748B" opacity="0"></text>
   </g>
 
   <!-- End card -->
   <g id="end-card" opacity="0">
-    <rect x="250" y="200" width="600" height="280" rx="16" fill="#1E293B" stroke="#10B981" stroke-width="2"/>
-    <text x="550" y="260" text-anchor="middle" font-size="28" font-weight="700" fill="#F1F5F9">PXRS</text>
-    <text x="550" y="300" text-anchor="middle" font-size="16" fill="#10B981">All 150 messages processed</text>
-    <text x="550" y="335" text-anchor="middle" font-size="14" fill="#94A3B8">Zero loss &bull; Zero duplication</text>
-    <line x1="400" y1="360" x2="700" y2="360" stroke="#334155" stroke-width="1"/>
-    <text x="550" y="390" text-anchor="middle" font-size="12" fill="#64748B">Epoch-fenced checkpointing</text>
-    <text x="550" y="412" text-anchor="middle" font-size="12" fill="#64748B">Fair-share rebalancing</text>
-    <text x="550" y="434" text-anchor="middle" font-size="12" fill="#64748B">Crash recovery with preserved offsets</text>
-    <text x="550" y="462" text-anchor="middle" font-size="11" fill="#475569">github.com/pxrs</text>
+    <rect x="200" y="150" width="700" height="360" rx="16" fill="#1E293B" stroke="#10B981" stroke-width="2"/>
+    <text x="550" y="220" text-anchor="middle" font-size="30" font-weight="700" fill="#F1F5F9">PXRS</text>
+    <text x="550" y="258" text-anchor="middle" font-size="16" fill="#10B981">All messages processed — zero loss, zero duplication</text>
+    <line x1="350" y1="280" x2="750" y2="280" stroke="#334155" stroke-width="1"/>
+    <text x="550" y="310" text-anchor="middle" font-size="13" fill="#94A3B8" font-weight="600">Architecture Highlights</text>
+    <text x="550" y="338" text-anchor="middle" font-size="12" fill="#64748B">BlockingQueue per partition — no polling, instant take()</text>
+    <text x="550" y="360" text-anchor="middle" font-size="12" fill="#64748B">ConsumerEngine: thread-per-partition lifecycle</text>
+    <text x="550" y="382" text-anchor="middle" font-size="12" fill="#64748B">Push-based assignments via coordinator diff</text>
+    <text x="550" y="404" text-anchor="middle" font-size="12" fill="#64748B">Epoch-fenced checkpointing prevents stale writes</text>
+    <text x="550" y="426" text-anchor="middle" font-size="12" fill="#64748B">Fair-share rebalance with crash recovery</text>
+    <text x="550" y="460" text-anchor="middle" font-size="12" fill="#94A3B8">Producer &#8594; PartitionQueues &#8594; Consumer.take() &#8594; Checkpoint &#8594; Store</text>
+    <text x="550" y="492" text-anchor="middle" font-size="11" fill="#475569">github.com/pxrs</text>
   </g>
 </svg>
 </div>
@@ -203,11 +254,13 @@ gsap.registerPlugin(MotionPathPlugin);
 const COLORS = {
   A: '#3B82F6', B: '#10B981', C: '#F59E0B',
   crash: '#EF4444', grey: '#6B7280', bg: '#1E293B',
-  border: '#475569', text: '#E2E8F0', dim: '#94A3B8'
+  border: '#475569', text: '#E2E8F0', dim: '#94A3B8',
+  purple: '#8B5CF6', coord: '#6366F1'
 };
 const PARTITION_COUNT = 8;
-const PW = 100, PH = 80, PGAP = 10;
-const CONSUMER_NAMES = ['Consumer A', 'Consumer B', 'Consumer C'];
+const PW = 105, PH = 155, PGAP = 9;
+const PSTART_X = 100;
+const CONSUMER_NAMES = ['Engine A', 'Engine B', 'Engine C'];
 const CONSUMER_COLORS = [COLORS.A, COLORS.B, COLORS.C];
 const CONSUMER_IDS = ['A', 'B', 'C'];
 
@@ -227,56 +280,75 @@ function buildPartitions() {
     const pg = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     pg.setAttribute('transform', `translate(${x}, 0)`);
     pg.setAttribute('opacity', '0');
+
+    // Queue section (top)
+    const queueH = 55;
+    // State section (below queue)
     pg.innerHTML = `
       <rect class="p-bg" x="0" y="0" width="${PW}" height="${PH}" rx="8" fill="${COLORS.bg}" stroke="${COLORS.border}" stroke-width="1.5"/>
-      <text class="p-id" x="${PW/2}" y="18" text-anchor="middle" font-size="13" font-weight="700" fill="${COLORS.dim}">P${i}</text>
-      <text class="p-owner" x="${PW/2}" y="34" text-anchor="middle" font-size="10" fill="${COLORS.grey}">unowned</text>
-      <text class="p-cp" x="${PW/2}" y="50" text-anchor="middle" font-size="10" fill="${COLORS.dim}">cp: 0</text>
-      <text class="p-epoch" x="${PW/2}" y="64" text-anchor="middle" font-size="10" fill="${COLORS.dim}">epoch: 0</text>
-      <rect class="p-buf-bar" x="5" y="${PH - 8}" width="0" height="4" rx="2" fill="${COLORS.grey}" opacity="0.5"/>
+      <line x1="5" y1="${queueH}" x2="${PW-5}" y2="${queueH}" stroke="#334155" stroke-width="0.5"/>
+      <text class="p-queue-label" x="${PW/2}" y="14" text-anchor="middle" font-size="8" fill="#475569" letter-spacing="1">QUEUE</text>
+      <rect class="p-queue-fill" x="8" y="20" width="${PW-16}" height="28" rx="4" fill="#0F172A" stroke="#1E3A5F" stroke-width="0.5"/>
+      <g class="p-queue-dots"></g>
+      <text class="p-id" x="${PW/2}" y="${queueH + 18}" text-anchor="middle" font-size="14" font-weight="700" fill="${COLORS.dim}">P${i}</text>
+      <text class="p-owner" x="${PW/2}" y="${queueH + 36}" text-anchor="middle" font-size="10" fill="${COLORS.grey}">unowned</text>
+      <text class="p-cp" x="${PW/2}" y="${queueH + 52}" text-anchor="middle" font-size="10" fill="${COLORS.dim}">cp: 0</text>
+      <text class="p-epoch" x="${PW/2}" y="${queueH + 68}" text-anchor="middle" font-size="10" fill="${COLORS.dim}">epoch: 0</text>
+      <text class="p-threads" x="${PW/2}" y="${queueH + 84}" text-anchor="middle" font-size="9" fill="#475569"></text>
     `;
     g.appendChild(pg);
     partitionEls.push(pg);
-    partitionState.push({ owner: null, checkpoint: 0, epoch: 0, buffer: 0 });
+    partitionState.push({ owner: null, checkpoint: 0, epoch: 0, buffer: 0, queueSize: 0 });
   }
 }
 
 function buildConsumers() {
   const g = document.getElementById('consumers-group');
+  // Positions aligned under partition groups
   const positions = [
-    { x: 135, w: 260 },
-    { x: 430, w: 260 },
-    { x: 735, w: 200 }
+    { x: PSTART_X, w: 3 * PW + 2 * PGAP },                          // A: P0-P2
+    { x: PSTART_X + 3 * (PW + PGAP), w: 3 * PW + 2 * PGAP },       // B: P3-P5
+    { x: PSTART_X + 6 * (PW + PGAP), w: 2 * PW + 1 * PGAP }        // C: P6-P7
   ];
   for (let i = 0; i < 3; i++) {
     const cg = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     cg.setAttribute('transform', `translate(${positions[i].x}, 0)`);
     cg.setAttribute('opacity', '0');
+    cg.setAttribute('data-base-x', positions[i].x);
+    cg.setAttribute('data-base-w', positions[i].w);
     const w = positions[i].w;
     cg.innerHTML = `
-      <rect class="c-bg" x="0" y="0" width="${w}" height="65" rx="10" fill="${COLORS.bg}" stroke="${CONSUMER_COLORS[i]}" stroke-width="2"/>
-      <circle class="c-heartbeat" cx="${w - 18}" cy="18" r="5" fill="${CONSUMER_COLORS[i]}" opacity="0.8"/>
-      <text class="c-name" x="${w/2}" y="24" text-anchor="middle" font-size="13" font-weight="600" fill="${CONSUMER_COLORS[i]}">${CONSUMER_NAMES[i]}</text>
-      <text class="c-processed" x="${w/2}" y="44" text-anchor="middle" font-size="11" fill="${COLORS.dim}">processed: 0</text>
-      <text class="c-partitions" x="${w/2}" y="58" text-anchor="middle" font-size="10" fill="${COLORS.grey}"></text>
+      <rect class="c-bg" x="0" y="0" width="${w}" height="110" rx="10" fill="${COLORS.bg}" stroke="${CONSUMER_COLORS[i]}" stroke-width="2"/>
+      <circle class="c-heartbeat" cx="${w - 20}" cy="20" r="5" fill="${CONSUMER_COLORS[i]}" opacity="0.8"/>
+      <text class="c-name" x="16" y="24" font-size="13" font-weight="600" fill="${CONSUMER_COLORS[i]}">${CONSUMER_NAMES[i]}</text>
+      <text class="c-sub" x="16" y="42" font-size="10" fill="#64748B">SimpleConsumer &middot; subscribe()</text>
+      <text class="c-threads-label" x="16" y="60" font-size="10" fill="${COLORS.dim}">threads: 0</text>
+      <text class="c-processed" x="16" y="78" font-size="11" fill="${COLORS.dim}">processed: 0</text>
+      <text class="c-partitions" x="16" y="96" font-size="10" fill="${COLORS.grey}"></text>
     `;
     g.appendChild(cg);
     consumerEls.push(cg);
-    consumerState.push({ processed: 0, alive: true });
+    consumerState.push({ processed: 0, alive: true, threadCount: 0 });
   }
 }
 
 function getPartitionCenter(pIdx) {
-  return { x: 115 + pIdx * (PW + PGAP) + PW / 2, y: 310 + PH / 2 };
+  return { x: PSTART_X + pIdx * (PW + PGAP) + PW / 2, y: 125 + PH / 2 };
+}
+
+function getPartitionQueueEntry(pIdx) {
+  return { x: PSTART_X + pIdx * (PW + PGAP) + PW / 2, y: 125 + 35 };
+}
+
+function getPartitionBottom(pIdx) {
+  return { x: PSTART_X + pIdx * (PW + PGAP) + PW / 2, y: 125 + PH + 2 };
 }
 
 function getConsumerTop(cIdx) {
-  const positions = [
-    { x: 135, w: 260 },
-    { x: 430, w: 260 },
-    { x: 735, w: 200 }
-  ];
-  return { x: positions[cIdx].x + positions[cIdx].w / 2, y: 530 };
+  const el = consumerEls[cIdx];
+  const baseX = parseFloat(el.getAttribute('data-base-x'));
+  const baseW = parseFloat(el.getAttribute('data-base-w'));
+  return { x: baseX + baseW / 2, y: 320 };
 }
 
 function updatePartitionDisplay(pIdx) {
@@ -291,12 +363,46 @@ function updateConsumerDisplay(cIdx) {
   const el = consumerEls[cIdx];
   const st = consumerState[cIdx];
   el.querySelector('.c-processed').textContent = `processed: ${st.processed}`;
+  el.querySelector('.c-threads-label').textContent = `threads: ${st.threadCount}`;
 }
 
 function setPartitionColor(pIdx, color) {
   const el = partitionEls[pIdx];
   el.querySelector('.p-bg').setAttribute('stroke', color);
   el.querySelector('.p-id').setAttribute('fill', color);
+}
+
+function addQueueDot(pIdx, color) {
+  const el = partitionEls[pIdx];
+  const dotsGroup = el.querySelector('.p-queue-dots');
+  const count = dotsGroup.children.length;
+  const cols = 6;
+  const dotR = 4;
+  const startX = 14;
+  const startY = 24;
+  const col = count % cols;
+  const row = Math.floor(count / cols);
+  const cx = startX + col * (dotR * 2 + 2);
+  const cy = startY + row * (dotR * 2 + 1);
+
+  if (cy > 48) return; // overflow
+
+  const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  dot.setAttribute('cx', cx);
+  dot.setAttribute('cy', cy);
+  dot.setAttribute('r', dotR);
+  dot.setAttribute('fill', color || '#A78BFA');
+  dot.setAttribute('opacity', '0.8');
+  dotsGroup.appendChild(dot);
+  return dot;
+}
+
+function removeQueueDot(pIdx) {
+  const el = partitionEls[pIdx];
+  const dotsGroup = el.querySelector('.p-queue-dots');
+  if (dotsGroup.lastChild) {
+    dotsGroup.removeChild(dotsGroup.lastChild);
+  }
 }
 
 function clearConnectors() {
@@ -307,11 +413,11 @@ function clearConnectors() {
 
 function drawConnector(pIdx, cIdx, color) {
   const g = document.getElementById('connectors');
-  const p = getPartitionCenter(pIdx);
+  const p = getPartitionBottom(pIdx);
   const c = getConsumerTop(cIdx);
   const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
   line.setAttribute('x1', p.x);
-  line.setAttribute('y1', p.y + PH / 2 + 2);
+  line.setAttribute('y1', p.y);
   line.setAttribute('x2', c.x);
   line.setAttribute('y2', c.y);
   line.setAttribute('stroke', color);
@@ -320,6 +426,23 @@ function drawConnector(pIdx, cIdx, color) {
   line.setAttribute('opacity', '0');
   g.appendChild(line);
   connectorEls.push(line);
+  return line;
+}
+
+function drawPushArrow(cIdx, color) {
+  const g = document.getElementById('push-arrows');
+  const cTop = getConsumerTop(cIdx);
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  // From coordinator area up to consumer
+  line.setAttribute('x1', 290);
+  line.setAttribute('y1', 468);
+  line.setAttribute('x2', cTop.x);
+  line.setAttribute('y2', 320 + 110);
+  line.setAttribute('stroke', color || COLORS.coord);
+  line.setAttribute('stroke-width', '1.5');
+  line.setAttribute('stroke-dasharray', '3 3');
+  line.setAttribute('opacity', '0');
+  g.appendChild(line);
   return line;
 }
 
@@ -353,7 +476,6 @@ const tl = gsap.timeline({
   onUpdate: () => {
     const prog = tl.progress();
     document.getElementById('progress-fill').style.width = (prog * 100) + '%';
-    // Update scene buttons
     const labels = ['scene1','scene2','scene3','scene4','scene5','scene6','scene7'];
     const times = labels.map(l => tl.labels[l] || 0);
     const cur = tl.time();
@@ -366,9 +488,9 @@ const tl = gsap.timeline({
     });
     const phaseLabels = [
       'Scene 1: System Initialization',
-      'Scene 2: Consumers Join & Assignment',
-      'Scene 3: Producer Sends Messages',
-      'Scene 4: Consumption & Checkpointing',
+      'Scene 2: Consumers Join & Push Assignments',
+      'Scene 3: Producer Sends to PartitionQueues',
+      'Scene 4: take() Consumption & Checkpointing',
       'Scene 5: Consumer A Crashes',
       'Scene 6: Rebalance & Recovery',
       'Scene 7: Resumed Processing'
@@ -385,26 +507,43 @@ tl.to('#title-card', { opacity: 1, duration: 1 });
 tl.to('#title-card', { opacity: 1, duration: 0.8 });
 tl.to('#title-card', { opacity: 0, duration: 0.6 });
 
+// Layer backgrounds
+tl.to('#layer-bgs', { opacity: 1, duration: 0.6 });
+
+// Coordination + Store layer appears first (infrastructure)
+tl.to('#coord-layer', { opacity: 1, duration: 0.5 }, '+=0.2');
+tl.call(() => {
+  document.getElementById('store-status').textContent = 'initialized: 8 partitions';
+  setStatus('RegistryStore initialized — 8 partition slots created');
+}, [], '+=0.2');
+
 // Partition slots animate in
 partitionEls.forEach((el, i) => {
-  tl.to(el, { opacity: 1, duration: 0.2, ease: 'back.out(1.5)' }, `-=${i > 0 ? 0.1 : 0}`);
+  tl.to(el, { opacity: 1, duration: 0.15, ease: 'back.out(1.5)' }, `-=${i > 0 ? 0.08 : 0}`);
 });
 
-tl.call(() => setStatus('8 partition slots initialized — all unowned'), [], '+=0.2');
+tl.call(() => setStatus('8 PartitionQueues ready — BlockingQueue per partition, all unowned'), [], '+=0.3');
 
-// ========== SCENE 2: Consumers Join & Partition Assignment ==========
+// ========== SCENE 2: Consumers Join & Push Assignments ==========
 tl.addLabel('scene2', '+=0.5');
 
 // Consumers slide in from below
 consumerEls.forEach((el, i) => {
-  gsap.set(el, { y: 80 });
+  gsap.set(el, { y: 60 });
   tl.to(el, { opacity: 1, y: 0, duration: 0.5, ease: 'back.out(1.2)' }, `scene2+=${i * 0.3}`);
 });
 
-// Rebalance calculation status
-tl.call(() => setStatus('Rebalance: 8 partitions / 3 consumers = 3, 3, 2'), [], '+=0.3');
+// Coordinator status
+tl.call(() => {
+  document.getElementById('coord-status').textContent = 'registering 3 consumers...';
+  document.getElementById('pm-status').textContent = 'computing fair-share...';
+  setStatus('Coordinator: addConsumer() x3 → registerConsumer() in store');
+}, [], '+=0.3');
 
-// Assign partitions to consumers: A gets 0-2, B gets 3-5, C gets 6-7
+// Rebalance calculation
+tl.call(() => setStatus('PartitionManager: 8/3 = base 2, remainder 2 → [3, 3, 2]'), [], '+=0.6');
+
+// Assign partitions: A gets 0-2, B gets 3-5, C gets 6-7
 const assignments3 = [[0,1,2],[3,4,5],[6,7]];
 assignments3.forEach((pList, cIdx) => {
   pList.forEach((pIdx, j) => {
@@ -413,24 +552,47 @@ assignments3.forEach((pList, cIdx) => {
       partitionState[pIdx].epoch = 1;
       updatePartitionDisplay(pIdx);
       setPartitionColor(pIdx, CONSUMER_COLORS[cIdx]);
-    }, [], `+=${j === 0 && cIdx === 0 ? 0.5 : 0.15}`);
+    }, [], `+=${j === 0 && cIdx === 0 ? 0.4 : 0.12}`);
 
-    // Flash effect
     tl.to(partitionEls[pIdx].querySelector('.p-bg'), {
-      fill: CONSUMER_COLORS[cIdx], duration: 0.15
+      fill: CONSUMER_COLORS[cIdx], duration: 0.12
     });
     tl.to(partitionEls[pIdx].querySelector('.p-bg'), {
-      fill: COLORS.bg, duration: 0.3
+      fill: COLORS.bg, duration: 0.25
     });
   });
 });
 
-// Update consumer partition labels
+// pushAssignments: show arrows from coordinator to engines
+tl.call(() => {
+  setStatus('pushAssignments() → engines get onPartitionAssigned()');
+  document.getElementById('coord-status').textContent = 'pushAssignments()';
+  for (let i = 0; i < 3; i++) {
+    const arrow = drawPushArrow(i, CONSUMER_COLORS[i]);
+    gsap.to(arrow, { opacity: 0.6, duration: 0.3, delay: i * 0.15 });
+    gsap.to(arrow, { opacity: 0, duration: 0.5, delay: 1.5 });
+  }
+}, [], '+=0.3');
+
+// Update consumer partition labels and thread counts
 tl.call(() => {
   consumerEls[0].querySelector('.c-partitions').textContent = 'P0, P1, P2';
   consumerEls[1].querySelector('.c-partitions').textContent = 'P3, P4, P5';
   consumerEls[2].querySelector('.c-partitions').textContent = 'P6, P7';
-});
+  consumerState[0].threadCount = 3;
+  consumerState[1].threadCount = 3;
+  consumerState[2].threadCount = 2;
+  updateConsumerDisplay(0);
+  updateConsumerDisplay(1);
+  updateConsumerDisplay(2);
+  // Thread labels on partitions
+  assignments3.forEach((pList, cIdx) => {
+    pList.forEach(pIdx => {
+      partitionEls[pIdx].querySelector('.p-threads').textContent = `thread → ${CONSUMER_IDS[cIdx]}`;
+      partitionEls[pIdx].querySelector('.p-threads').setAttribute('fill', CONSUMER_COLORS[cIdx]);
+    });
+  });
+}, [], '+=0.3');
 
 // Draw connector lines
 tl.call(() => {
@@ -441,11 +603,15 @@ tl.call(() => {
     });
   });
 });
-tl.call(() => setStatus('All partitions assigned — epoch=1'), [], '+=0.5');
 
-// Heartbeat pulse animation (continuous)
 tl.call(() => {
-  consumerEls.forEach((el, i) => {
+  document.getElementById('coord-status').textContent = 'running';
+  setStatus('Engines spawned threads — each subscribe() blocks on take()');
+}, [], '+=0.4');
+
+// Heartbeat pulse animation
+tl.call(() => {
+  consumerEls.forEach(el => {
     const hb = el.querySelector('.c-heartbeat');
     gsap.to(hb, {
       scale: 1.4, opacity: 0.4, duration: 0.6,
@@ -456,113 +622,118 @@ tl.call(() => {
   });
 });
 
-// ========== SCENE 3: Producer Sends Messages ==========
-tl.addLabel('scene3', '+=0.8');
+// ========== SCENE 3: Producer Sends to PartitionQueues ==========
+tl.addLabel('scene3', '+=0.6');
 
-// Producer appears
 tl.to('#producer', { opacity: 1, duration: 0.4 }, 'scene3');
 tl.to('#hash-funnel', { opacity: 1, duration: 0.4 }, 'scene3+=0.1');
 tl.to('#prod-funnel-line', { opacity: 0.6, duration: 0.3 }, 'scene3+=0.2');
 
-tl.call(() => setStatus('Producer sending messages through hash partitioner'), [], '+=0.2');
+tl.call(() => setStatus('Producer: send() → hash → buffer + partitionQueues.put()'), [], '+=0.2');
 
-// Send 12 messages with routing animation
-const messageTargets = [0, 3, 6, 1, 4, 7, 2, 5, 0, 3, 1, 6];
-const msgColors = ['#A78BFA', '#C084FC', '#818CF8', '#A78BFA', '#C084FC', '#818CF8',
-                   '#A78BFA', '#C084FC', '#818CF8', '#A78BFA', '#C084FC', '#818CF8'];
+// Send messages — they go into partition queues
+const messageTargets = [0, 3, 6, 1, 4, 7, 2, 5, 0, 3, 1, 6, 2, 5, 4, 7];
+const msgColors = ['#A78BFA', '#C084FC', '#818CF8'];
 
 messageTargets.forEach((targetP, i) => {
   tl.call(() => {
     producerSent++;
     updateProducerCount();
     const dot = createMessageDot(msgColors[i % msgColors.length]);
-    const pCenter = getPartitionCenter(targetP);
-    const producerX = 180;
-    const producerY = 230;
-    const funnelX = 270;
-    const funnelY = 230;
+    const pQueue = getPartitionQueueEntry(targetP);
+    const producerX = 190;
+    const producerY = 50;
+    const funnelX = 280;
+    const funnelY = 50;
 
     gsap.set(dot, { attr: { cx: producerX, cy: producerY }, opacity: 0 });
     const dotTl = gsap.timeline();
-    dotTl.to(dot, { opacity: 0.9, duration: 0.1 });
-    dotTl.to(dot, { attr: { cx: funnelX, cy: funnelY }, duration: 0.2, ease: 'power1.in' });
-    dotTl.to(dot, { attr: { cx: funnelX, cy: 260 }, duration: 0.1, ease: 'power1.in' });
-    dotTl.to(dot, { attr: { cx: pCenter.x, cy: pCenter.y - 10 }, duration: 0.25, ease: 'power2.out' });
-    dotTl.to(dot, { opacity: 0, scale: 0, duration: 0.15 });
+    dotTl.to(dot, { opacity: 0.9, duration: 0.08 });
+    dotTl.to(dot, { attr: { cx: funnelX, cy: funnelY }, duration: 0.15, ease: 'power1.in' });
+    dotTl.to(dot, { attr: { cx: funnelX, cy: 77 }, duration: 0.08, ease: 'power1.in' });
+    dotTl.to(dot, { attr: { cx: pQueue.x, cy: pQueue.y }, duration: 0.2, ease: 'power2.out' });
+    dotTl.to(dot, { opacity: 0, scale: 0, duration: 0.12 });
     dotTl.call(() => {
       partitionState[targetP].buffer++;
-      const bufBar = partitionEls[targetP].querySelector('.p-buf-bar');
-      gsap.to(bufBar, { attr: { width: Math.min(partitionState[targetP].buffer * 15, PW - 10) }, duration: 0.2 });
+      partitionState[targetP].queueSize++;
+      addQueueDot(targetP, msgColors[i % msgColors.length]);
       dot.remove();
     });
-  }, [], `+=${i === 0 ? 0.3 : 0.3}`);
+  }, [], `+=${i === 0 ? 0.2 : 0.2}`);
 });
 
-tl.call(() => setStatus(`${producerSent} messages distributed across 8 partitions`), [], '+=1');
+tl.call(() => setStatus(`${producerSent} messages queued — consumers blocked on take() wake up instantly`), [], '+=0.8');
 
-// ========== SCENE 4: Consumption & Checkpointing ==========
-tl.addLabel('scene4', '+=0.8');
-tl.call(() => setStatus('Consumers pulling messages — epoch-fenced checkpointing'), [], 'scene4');
+// ========== SCENE 4: take() Consumption & Checkpointing ==========
+tl.addLabel('scene4', '+=0.6');
+tl.call(() => setStatus('Consumer threads: take() → consumeMessage → checkpoint (epoch-fenced)'), [], 'scene4');
 
-// Animate consumption: messages flow from partitions to consumers
-function animateConsumption(pIdx, cIdx, count, labelOffset) {
+// Animate consumption: dots flow from queue area to consumer engines
+function animateConsumption(pIdx, cIdx, count) {
   for (let m = 0; m < count; m++) {
     tl.call(() => {
       const dot = createMessageDot(CONSUMER_COLORS[cIdx]);
-      const pCenter = getPartitionCenter(pIdx);
+      const pBottom = getPartitionBottom(pIdx);
       const cTop = getConsumerTop(cIdx);
-      gsap.set(dot, { attr: { cx: pCenter.x, cy: pCenter.y + PH / 2 }, opacity: 0 });
+      gsap.set(dot, { attr: { cx: pBottom.x, cy: pBottom.y - 10 }, opacity: 0 });
       const dotTl = gsap.timeline();
-      dotTl.to(dot, { opacity: 0.8, duration: 0.08 });
-      dotTl.to(dot, { attr: { cx: cTop.x, cy: cTop.y }, duration: 0.3, ease: 'power2.in' });
-      dotTl.to(dot, { opacity: 0, duration: 0.1 });
+      dotTl.to(dot, { opacity: 0.8, duration: 0.06 });
+      dotTl.to(dot, { attr: { cx: cTop.x, cy: cTop.y + 10 }, duration: 0.25, ease: 'power2.in' });
+      dotTl.to(dot, { opacity: 0, duration: 0.08 });
       dotTl.call(() => {
         partitionState[pIdx].checkpoint++;
+        partitionState[pIdx].queueSize = Math.max(0, partitionState[pIdx].queueSize - 1);
         consumerState[cIdx].processed++;
         updatePartitionDisplay(pIdx);
         updateConsumerDisplay(cIdx);
+        removeQueueDot(pIdx);
         dot.remove();
       });
-    }, [], `+=${m === 0 && labelOffset === 0 ? 0.3 : 0.18}`);
+    }, [], `+=${m === 0 ? 0.2 : 0.15}`);
   }
 }
 
-// Consumer A processes from P0,P1,P2
-animateConsumption(0, 0, 3, 0);
-animateConsumption(1, 0, 2, 0);
-animateConsumption(2, 0, 2, 0);
-// Consumer B processes from P3,P4,P5
-animateConsumption(3, 1, 3, 0);
-animateConsumption(4, 1, 2, 0);
-animateConsumption(5, 1, 2, 0);
-// Consumer C processes from P6,P7
-animateConsumption(6, 2, 2, 0);
-animateConsumption(7, 2, 2, 0);
+// A processes P0,P1,P2
+animateConsumption(0, 0, 2);
+animateConsumption(1, 0, 2);
+animateConsumption(2, 0, 2);
+// B processes P3,P4,P5
+animateConsumption(3, 1, 2);
+animateConsumption(4, 1, 2);
+animateConsumption(5, 1, 2);
+// C processes P6,P7
+animateConsumption(6, 2, 2);
+animateConsumption(7, 2, 2);
 
-// Epoch check badges
+// Show store checkpoint updates
 tl.call(() => {
+  document.getElementById('store-status').textContent = 'checkpoints advancing...';
+  // Epoch check badges
   for (let p = 0; p < PARTITION_COUNT; p++) {
     const el = partitionEls[p];
     const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     badge.setAttribute('x', PW - 8);
-    badge.setAttribute('y', 14);
+    badge.setAttribute('y', 70);
     badge.setAttribute('text-anchor', 'end');
     badge.setAttribute('font-size', '9');
     badge.setAttribute('fill', '#10B981');
     badge.setAttribute('opacity', '0');
-    badge.textContent = 'e1 \u2713';
+    badge.textContent = '\u2713 e1';
     el.appendChild(badge);
-    gsap.to(badge, { opacity: 1, duration: 0.3, delay: p * 0.08 });
-    gsap.to(badge, { opacity: 0, duration: 0.5, delay: 1.5 + p * 0.08 });
+    gsap.to(badge, { opacity: 1, duration: 0.3, delay: p * 0.06 });
+    gsap.to(badge, { opacity: 0, duration: 0.5, delay: 1.5 + p * 0.06 });
   }
 }, [], '+=0.3');
 
-tl.call(() => setStatus('Checkpoints advancing — all epoch fences passing'), [], '+=0.5');
+tl.call(() => setStatus('All checkpoints epoch-fenced — store.updateCheckpoint(partitionId, consumerId, offset, epoch)'), [], '+=0.5');
 tl.addPause('+=1.5');
 
 // ========== SCENE 5: Consumer A Crashes ==========
 tl.addLabel('scene5', '+=0.3');
-tl.call(() => setStatus('Consumer A heartbeat timeout — crash detected!'), [], 'scene5');
+tl.call(() => {
+  setStatus('Consumer A crash — coordinator.removeConsumer(engineA)');
+  document.getElementById('coord-status').textContent = 'crash detected!';
+}, [], 'scene5');
 
 // Stop heartbeat on A
 tl.call(() => {
@@ -570,23 +741,26 @@ tl.call(() => {
   gsap.killTweensOf(hb);
   gsap.to(hb, { fill: COLORS.crash, attr: { r: 5 }, opacity: 1, duration: 0.3 });
   consumerState[0].alive = false;
+  consumerState[0].threadCount = 0;
+  updateConsumerDisplay(0);
 });
 
-// Flatline: heartbeat turns to dash
-tl.to(consumerEls[0].querySelector('.c-heartbeat'), { fill: COLORS.crash, duration: 0.3 }, '+=0.2');
-
 // Shake + red
-tl.to(consumerEls[0].querySelector('.c-bg'), { stroke: COLORS.crash, duration: 0.2 }, '+=0.1');
+tl.to(consumerEls[0].querySelector('.c-bg'), { stroke: COLORS.crash, duration: 0.2 }, '+=0.2');
 tl.to(consumerEls[0], { x: -5, duration: 0.05, repeat: 5, yoyo: true }, '+=0.1');
 tl.to(consumerEls[0].querySelector('.c-name'), { fill: COLORS.crash, duration: 0.2 });
+tl.call(() => {
+  consumerEls[0].querySelector('.c-sub').textContent = 'threads interrupted';
+  consumerEls[0].querySelector('.c-sub').setAttribute('fill', COLORS.crash);
+});
 
 // Fade out consumer A
-tl.to(consumerEls[0], { opacity: 0.2, duration: 0.6 }, '+=0.3');
+tl.to(consumerEls[0], { opacity: 0.15, duration: 0.6 }, '+=0.3');
 
-// Snap connector lines for partitions 0-2
+// Snap connector lines for A's partitions
 tl.call(() => {
   connectorEls.forEach((line, idx) => {
-    if (idx < 3) { // First 3 connectors belong to consumer A
+    if (idx < 3) {
       gsap.to(line, { opacity: 0, duration: 0.3 });
     }
   });
@@ -597,30 +771,39 @@ tl.call(() => {
   [0, 1, 2].forEach(pIdx => {
     const bg = partitionEls[pIdx].querySelector('.p-bg');
     gsap.to(bg, { stroke: COLORS.crash, duration: 0.3 });
-    // Flash warning
     gsap.to(bg, { fill: '#2D1515', duration: 0.3 });
     gsap.to(bg, { fill: COLORS.bg, duration: 0.5, delay: 0.5 });
-    // Update label
     partitionState[pIdx].owner = null;
     const ownerText = partitionEls[pIdx].querySelector('.p-owner');
     ownerText.textContent = 'ORPHANED';
     ownerText.setAttribute('fill', COLORS.crash);
+    partitionEls[pIdx].querySelector('.p-threads').textContent = '';
   });
 }, [], '+=0.2');
 
-tl.call(() => setStatus('Zombie detection: Consumer A lease expired — P0, P1, P2 orphaned. Checkpoints preserved.'), [], '+=0.5');
+tl.call(() => {
+  document.getElementById('store-status').textContent = 'partitions released, checkpoints preserved';
+  setStatus('Engine A stopped — threads interrupted, partitions released. Checkpoints preserved.');
+}, [], '+=0.5');
 tl.addPause('+=1.5');
 
 // ========== SCENE 6: Rebalance & Recovery ==========
 tl.addLabel('scene6', '+=0.3');
-tl.call(() => setStatus('Rebalance triggered: 8 partitions / 2 consumers = 4, 4'), [], 'scene6');
+tl.call(() => {
+  setStatus('triggerRebalance() → reclaimExpired → rebalance → pushAssignments');
+  document.getElementById('coord-status').textContent = 'rebalancing...';
+  document.getElementById('pm-status').textContent = '8/2 = 4 each';
+}, [], 'scene6');
 
 // Clear old connectors
 tl.call(() => clearConnectors(), [], '+=0.5');
+tl.call(() => {
+  document.getElementById('push-arrows').innerHTML = '';
+});
 
 // Reassign: B gets 0-3, C gets 4-7
 const assignments2 = [[0,1,2,3],[4,5,6,7]];
-const rebalConsumers = [1, 2]; // B and C
+const rebalConsumers = [1, 2];
 assignments2.forEach((pList, aIdx) => {
   const cIdx = rebalConsumers[aIdx];
   pList.forEach((pIdx, j) => {
@@ -631,21 +814,63 @@ assignments2.forEach((pList, aIdx) => {
       setPartitionColor(pIdx, CONSUMER_COLORS[cIdx]);
       const ownerText = partitionEls[pIdx].querySelector('.p-owner');
       ownerText.setAttribute('fill', COLORS.dim);
-    }, [], `+=${j === 0 && aIdx === 0 ? 0.3 : 0.12}`);
+      partitionEls[pIdx].querySelector('.p-threads').textContent = `thread → ${CONSUMER_IDS[cIdx]}`;
+      partitionEls[pIdx].querySelector('.p-threads').setAttribute('fill', CONSUMER_COLORS[cIdx]);
+    }, [], `+=${j === 0 && aIdx === 0 ? 0.3 : 0.1}`);
 
     tl.to(partitionEls[pIdx].querySelector('.p-bg'), {
-      fill: CONSUMER_COLORS[cIdx], duration: 0.15
+      fill: CONSUMER_COLORS[cIdx], duration: 0.12
     });
     tl.to(partitionEls[pIdx].querySelector('.p-bg'), {
-      fill: COLORS.bg, duration: 0.3
+      fill: COLORS.bg, duration: 0.25
     });
   });
 });
 
-// Update consumer partition labels
+// Show push arrows to B and C
+tl.call(() => {
+  setStatus('pushAssignments() → onPartitionAssigned for new partitions, onPartitionRevoked for old');
+  [1, 2].forEach((cIdx, i) => {
+    const arrow = drawPushArrow(cIdx, CONSUMER_COLORS[cIdx]);
+    gsap.to(arrow, { opacity: 0.6, duration: 0.3, delay: i * 0.15 });
+    gsap.to(arrow, { opacity: 0, duration: 0.5, delay: 1.5 });
+  });
+}, [], '+=0.2');
+
+// Update consumer labels and thread counts
 tl.call(() => {
   consumerEls[1].querySelector('.c-partitions').textContent = 'P0, P1, P2, P3';
   consumerEls[2].querySelector('.c-partitions').textContent = 'P4, P5, P6, P7';
+  consumerState[1].threadCount = 4;
+  consumerState[2].threadCount = 4;
+  updateConsumerDisplay(1);
+  updateConsumerDisplay(2);
+});
+
+// Reposition consumers: B under P0-P3, C under P4-P7
+tl.call(() => {
+  const newBx = PSTART_X;
+  const newBw = 4 * PW + 3 * PGAP;
+  const newCx = PSTART_X + 4 * (PW + PGAP);
+  const newCw = 4 * PW + 3 * PGAP;
+
+  // Animate B
+  consumerEls[1].setAttribute('data-base-x', newBx);
+  consumerEls[1].setAttribute('data-base-w', newBw);
+  const bBg = consumerEls[1].querySelector('.c-bg');
+  gsap.to(consumerEls[1], { attr: { transform: `translate(${newBx}, 0)` }, duration: 0.6, ease: 'power2.inOut' });
+  gsap.to(bBg, { attr: { width: newBw }, duration: 0.6, ease: 'power2.inOut' });
+  const bHb = consumerEls[1].querySelector('.c-heartbeat');
+  gsap.to(bHb, { attr: { cx: newBw - 20 }, duration: 0.6, ease: 'power2.inOut' });
+
+  // Animate C
+  consumerEls[2].setAttribute('data-base-x', newCx);
+  consumerEls[2].setAttribute('data-base-w', newCw);
+  const cBg = consumerEls[2].querySelector('.c-bg');
+  gsap.to(consumerEls[2], { attr: { transform: `translate(${newCx}, 0)` }, duration: 0.6, ease: 'power2.inOut' });
+  gsap.to(cBg, { attr: { width: newCw }, duration: 0.6, ease: 'power2.inOut' });
+  const cHb = consumerEls[2].querySelector('.c-heartbeat');
+  gsap.to(cHb, { attr: { cx: newCw - 20 }, duration: 0.6, ease: 'power2.inOut' });
 });
 
 // Draw new connectors
@@ -657,24 +882,20 @@ tl.call(() => {
       gsap.to(line, { opacity: 0.5, duration: 0.5 });
     });
   });
-}, [], '+=0.2');
+}, [], '+=0.3');
 
-// Reposition consumers visually
 tl.call(() => {
-  // Consumer B now centered under 0-3
-  gsap.to(consumerEls[1], { x: -140, duration: 0.6, ease: 'power2.inOut' });
-  // Consumer C now centered under 4-7
-  gsap.to(consumerEls[2], { x: -80, duration: 0.6, ease: 'power2.inOut' });
-});
-
-tl.call(() => setStatus('Partitions rebalanced — checkpoints preserved at prior offsets'), [], '+=0.5');
+  document.getElementById('coord-status').textContent = 'running';
+  document.getElementById('store-status').textContent = 'checkpoints preserved';
+  setStatus('Rebalanced: B[0-3] C[4-7] — new threads spawned, subscribe() resumes from checkpoint');
+}, [], '+=0.4');
 tl.addPause('+=1.2');
 
 // ========== SCENE 7: Resumed Processing ==========
 tl.addLabel('scene7', '+=0.3');
-tl.call(() => setStatus('Resuming from preserved checkpoints — no reprocessing needed'), [], 'scene7');
+tl.call(() => setStatus('Engines spawn new threads → subscribe(partitionId, checkpoint) → replay then take()'), [], 'scene7');
 
-// Highlight checkpoints on P0-P2 to show they're preserved
+// Highlight preserved checkpoints on P0-P2
 tl.call(() => {
   [0, 1, 2].forEach(pIdx => {
     const cpEl = partitionEls[pIdx].querySelector('.p-cp');
@@ -683,7 +904,7 @@ tl.call(() => {
   });
 }, [], '+=0.3');
 
-// Add resume labels
+// Resume labels
 tl.call(() => {
   [0, 1, 2].forEach(pIdx => {
     const el = partitionEls[pIdx];
@@ -706,22 +927,13 @@ function animateResumedConsumption(pIdx, cIdx, count) {
   for (let m = 0; m < count; m++) {
     tl.call(() => {
       const dot = createMessageDot(CONSUMER_COLORS[cIdx]);
-      const pCenter = getPartitionCenter(pIdx);
+      const pBottom = getPartitionBottom(pIdx);
       const cTop = getConsumerTop(cIdx);
-      // Adjust cTop for repositioned consumers
-      const adjustX = cIdx === 1 ? -140 : -80;
-      const positions = [
-        { x: 135, w: 260 },
-        { x: 430, w: 260 },
-        { x: 735, w: 200 }
-      ];
-      const cx = positions[cIdx].x + positions[cIdx].w / 2 + adjustX;
-
-      gsap.set(dot, { attr: { cx: pCenter.x, cy: pCenter.y + PH / 2 }, opacity: 0 });
+      gsap.set(dot, { attr: { cx: pBottom.x, cy: pBottom.y - 10 }, opacity: 0 });
       const dotTl = gsap.timeline();
-      dotTl.to(dot, { opacity: 0.8, duration: 0.08 });
-      dotTl.to(dot, { attr: { cx: cx, cy: 530 }, duration: 0.3, ease: 'power2.in' });
-      dotTl.to(dot, { opacity: 0, duration: 0.1 });
+      dotTl.to(dot, { opacity: 0.8, duration: 0.06 });
+      dotTl.to(dot, { attr: { cx: cTop.x, cy: cTop.y + 10 }, duration: 0.25, ease: 'power2.in' });
+      dotTl.to(dot, { opacity: 0, duration: 0.08 });
       dotTl.call(() => {
         partitionState[pIdx].checkpoint++;
         consumerState[cIdx].processed++;
@@ -729,33 +941,32 @@ function animateResumedConsumption(pIdx, cIdx, count) {
         updateConsumerDisplay(cIdx);
         dot.remove();
       });
-    }, [], `+=${m === 0 ? 0.15 : 0.12}`);
+    }, [], `+=${m === 0 ? 0.12 : 0.1}`);
   }
 }
 
-// B processes from P0,P1,P2,P3 — continuing from checkpoints
 animateResumedConsumption(0, 1, 2);
 animateResumedConsumption(1, 1, 2);
 animateResumedConsumption(2, 1, 2);
 animateResumedConsumption(3, 1, 2);
-// C processes from P4,P5,P6,P7
 animateResumedConsumption(4, 2, 2);
 animateResumedConsumption(5, 2, 2);
 animateResumedConsumption(6, 2, 2);
 animateResumedConsumption(7, 2, 2);
 
-tl.call(() => setStatus('All messages processed from correct offsets — zero loss, zero duplication'), [], '+=0.5');
+tl.call(() => setStatus('All messages consumed from correct offsets — zero loss, zero duplication'), [], '+=0.5');
 
 // Final totals
 tl.call(() => {
   let totalProcessed = 0;
   consumerState.forEach(c => totalProcessed += c.processed);
-  setStatus(`Complete: ${totalProcessed} messages processed across all consumers`);
+  setStatus(`Complete: ${totalProcessed} messages processed | Blocking take() | Push assignments | Epoch fencing`);
 }, [], '+=0.5');
 
 // Fade everything out and show end card
-tl.to(['#partitions-group', '#consumers-group', '#connectors', '#producer', '#hash-funnel',
-       '#prod-funnel-line', '#messages-layer', '#status-bar'], {
+tl.to(['#layer-bgs', '#partitions-group', '#consumers-group', '#connectors', '#push-arrows',
+       '#producer', '#hash-funnel', '#prod-funnel-line', '#coord-layer',
+       '#messages-layer', '#status-bar'], {
   opacity: 0, duration: 1
 }, '+=1');
 
@@ -790,43 +1001,62 @@ btnRestart.addEventListener('click', () => {
   producerSent = 0;
   updateProducerCount();
   partitionState.forEach((ps, i) => {
-    ps.owner = null; ps.checkpoint = 0; ps.epoch = 0; ps.buffer = 0;
+    ps.owner = null; ps.checkpoint = 0; ps.epoch = 0; ps.buffer = 0; ps.queueSize = 0;
     updatePartitionDisplay(i);
     setPartitionColor(i, COLORS.border);
-    const bufBar = partitionEls[i].querySelector('.p-buf-bar');
-    bufBar.setAttribute('width', '0');
+    partitionEls[i].querySelector('.p-threads').textContent = '';
+    partitionEls[i].querySelector('.p-queue-dots').innerHTML = '';
   });
   consumerState.forEach((cs, i) => {
-    cs.processed = 0; cs.alive = true;
+    cs.processed = 0; cs.alive = true; cs.threadCount = 0;
     updateConsumerDisplay(i);
   });
   clearConnectors();
   document.getElementById('messages-layer').innerHTML = '';
+  document.getElementById('push-arrows').innerHTML = '';
 
-  // Reset visual transforms
-  consumerEls.forEach(el => {
-    gsap.set(el, { x: 0, y: 80, opacity: 0 });
+  // Reset consumer transforms and sizes
+  const origPositions = [
+    { x: PSTART_X, w: 3 * PW + 2 * PGAP },
+    { x: PSTART_X + 3 * (PW + PGAP), w: 3 * PW + 2 * PGAP },
+    { x: PSTART_X + 6 * (PW + PGAP), w: 2 * PW + 1 * PGAP }
+  ];
+  consumerEls.forEach((el, i) => {
+    gsap.killTweensOf(el);
+    gsap.set(el, { y: 60, opacity: 0 });
+    el.setAttribute('transform', `translate(${origPositions[i].x}, 0)`);
+    el.setAttribute('data-base-x', origPositions[i].x);
+    el.setAttribute('data-base-w', origPositions[i].w);
     const bg = el.querySelector('.c-bg');
-    const name = el.querySelector('.c-name');
+    bg.setAttribute('width', origPositions[i].w);
+    bg.setAttribute('stroke', CONSUMER_COLORS[i]);
+    el.querySelector('.c-name').setAttribute('fill', CONSUMER_COLORS[i]);
     const hb = el.querySelector('.c-heartbeat');
     gsap.killTweensOf(hb);
-    gsap.set(hb, { attr: { r: 5 } });
+    hb.setAttribute('cx', origPositions[i].w - 20);
+    hb.setAttribute('r', '5');
+    hb.setAttribute('fill', CONSUMER_COLORS[i]);
+    el.querySelector('.c-sub').textContent = 'SimpleConsumer \u00B7 subscribe()';
+    el.querySelector('.c-sub').setAttribute('fill', '#64748B');
+    el.querySelector('.c-partitions').textContent = '';
   });
-  // Reset consumer A stroke back to blue
-  consumerEls[0].querySelector('.c-bg').setAttribute('stroke', COLORS.A);
-  consumerEls[0].querySelector('.c-name').setAttribute('fill', COLORS.A);
-  consumerEls[0].querySelector('.c-heartbeat').setAttribute('fill', COLORS.A);
 
   partitionEls.forEach(el => {
-    const bg = el.querySelector('.p-bg');
-    bg.setAttribute('fill', COLORS.bg);
-    const ownerText = el.querySelector('.p-owner');
-    ownerText.setAttribute('fill', COLORS.grey);
+    el.querySelector('.p-bg').setAttribute('fill', COLORS.bg);
+    el.querySelector('.p-owner').setAttribute('fill', COLORS.grey);
   });
 
+  // Reset coordination text
+  document.getElementById('coord-status').textContent = 'idle';
+  document.getElementById('pm-status').textContent = '8 partitions';
+  document.getElementById('store-status').textContent = 'initialized';
+
   // Reset group opacities
-  gsap.set(['#partitions-group', '#consumers-group', '#connectors', '#producer', '#hash-funnel',
-            '#prod-funnel-line', '#messages-layer', '#status-bar'], { opacity: 1 });
+  gsap.set(['#layer-bgs', '#partitions-group', '#consumers-group', '#connectors', '#push-arrows',
+            '#producer', '#hash-funnel', '#prod-funnel-line', '#coord-layer',
+            '#messages-layer', '#status-bar'], { opacity: 1 });
+  gsap.set('#layer-bgs', { opacity: 0 });
+  gsap.set('#coord-layer', { opacity: 0 });
   gsap.set('#end-card', { opacity: 0 });
   gsap.set('#status-text', { opacity: 0 });
 
@@ -848,7 +1078,6 @@ document.querySelectorAll('.scene-btns button').forEach(btn => {
   });
 });
 
-// Progress bar seeking
 document.getElementById('progress-bar').addEventListener('click', (e) => {
   const rect = e.currentTarget.getBoundingClientRect();
   const pct = (e.clientX - rect.left) / rect.width;

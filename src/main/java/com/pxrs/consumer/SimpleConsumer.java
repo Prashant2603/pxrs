@@ -1,32 +1,31 @@
 package com.pxrs.consumer;
 
-import com.pxrs.coordination.ConsumerCoordinator;
-import com.pxrs.model.Message;
-import com.pxrs.model.PartitionState;
+import com.pxrs.shared.Message;
+import com.pxrs.shared.PartitionQueues;
+import com.pxrs.shared.PartitionState;
 import com.pxrs.producer.Producer;
-import com.pxrs.store.InMemoryRegistryStore;
 import com.pxrs.store.RegistryStore;
 
-import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class SimpleConsumer implements Consumer {
 
     private final String consumerId;
-    private final RegistryStore store;
+    private final PartitionQueues partitionQueues;
     private final Producer producer;
-    private final ConsumerCoordinator coordinator;
-    private final AtomicBoolean running = new AtomicBoolean(false);
+    private final RegistryStore store;
+    private final Map<Integer, AtomicBoolean> activePartitions = new ConcurrentHashMap<>();
     private final AtomicInteger messagesProcessed = new AtomicInteger(0);
-    private Thread pollThread;
 
-    public SimpleConsumer(String consumerId, RegistryStore store, Producer producer,
-                          ConsumerCoordinator coordinator) {
+    public SimpleConsumer(String consumerId, PartitionQueues partitionQueues,
+                          Producer producer, RegistryStore store) {
         this.consumerId = consumerId;
-        this.store = store;
+        this.partitionQueues = partitionQueues;
         this.producer = producer;
-        this.coordinator = coordinator;
+        this.store = store;
     }
 
     @Override
@@ -35,82 +34,75 @@ public class SimpleConsumer implements Consumer {
     }
 
     @Override
-    public void start() {
-        coordinator.registerConsumer(consumerId);
-        running.set(true);
-        pollThread = new Thread(this::pollLoop, "consumer-" + consumerId);
-        pollThread.setDaemon(true);
-        pollThread.start();
-    }
+    public void subscribe(int partitionId, long checkpoint) {
+        AtomicBoolean active = new AtomicBoolean(true);
+        activePartitions.put(partitionId, active);
 
-    @Override
-    public void stop() {
-        running.set(false);
-        if (pollThread != null) {
-            pollThread.interrupt();
-            try {
-                pollThread.join(5000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+        // Replay historical messages
+        long offset = checkpoint;
+        while (active.get()) {
+            Message msg = producer.getNextMessage(partitionId, offset);
+            if (msg == null) {
+                break;
+            }
+            consumeMessage(msg);
+            offset++;
+            checkpoint(partitionId, offset);
+            if (!active.get()) {
+                return;
             }
         }
-        store.releaseAllPartitions(consumerId);
-        coordinator.deregisterConsumer(consumerId);
+
+        // Live consumption from queue
+        while (active.get()) {
+            try {
+                Message msg = partitionQueues.take(partitionId);
+                if (!active.get()) {
+                    return;
+                }
+                consumeMessage(msg);
+                offset++;
+                checkpoint(partitionId, offset);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     @Override
-    public void processMessage(Message message) {
-        System.out.println("[" + consumerId + "] Processed: partition=" +
-                message.getPartitionId() + " key=" + message.getPartitionKey() +
-                " payload=" + message.getPayload());
-        messagesProcessed.incrementAndGet();
+    public void unsubscribe(int partitionId) {
+        AtomicBoolean active = activePartitions.get(partitionId);
+        if (active != null) {
+            active.set(false);
+        }
+    }
+
+    @Override
+    public void checkpoint(int partitionId, long offset) {
+        PartitionState ps = store.getPartitionState(partitionId);
+        if (ps == null) {
+            return;
+        }
+        long epoch = ps.getVersionEpoch();
+        boolean updated = store.updateCheckpoint(partitionId, consumerId, offset, epoch);
+        if (!updated) {
+            // Epoch mismatch — lost ownership
+            AtomicBoolean active = activePartitions.get(partitionId);
+            if (active != null) {
+                active.set(false);
+            }
+        }
     }
 
     public int getMessagesProcessed() {
         return messagesProcessed.get();
     }
 
-    private void pollLoop() {
-        while (running.get()) {
-            try {
-                List<PartitionState> myPartitions = store.getPartitionsOwnedBy(consumerId);
-                for (PartitionState ps : myPartitions) {
-                    if (!running.get()) break;
-                    consumePartition(ps);
-                }
-
-                // Heartbeat for in-memory store
-                if (store instanceof InMemoryRegistryStore memStore) {
-                    for (PartitionState ps : myPartitions) {
-                        memStore.updateHeartbeat(consumerId, ps.getPartitionId());
-                    }
-                }
-
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-    }
-
-    private void consumePartition(PartitionState ps) {
-        long checkpoint = store.getCheckpoint(ps.getPartitionId());
-        long epoch = ps.getVersionEpoch();
-
-        while (running.get()) {
-            Message msg = producer.getNextMessage(ps.getPartitionId(), checkpoint);
-            if (msg == null) {
-                break;
-            }
-            processMessage(msg);
-            checkpoint++;
-            boolean updated = store.updateCheckpoint(
-                    ps.getPartitionId(), consumerId, checkpoint, epoch);
-            if (!updated) {
-                // Epoch changed — we lost ownership
-                break;
-            }
-        }
+    private void consumeMessage(Message msg) {
+        System.out.println("[" + consumerId + "] Processed: partition=" +
+                msg.getPartitionId() + " key=" + msg.getPartitionKey() +
+                " payload=" + msg.getPayload());
+        messagesProcessed.incrementAndGet();
     }
 }

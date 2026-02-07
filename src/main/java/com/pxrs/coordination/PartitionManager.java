@@ -1,7 +1,7 @@
 package com.pxrs.coordination;
 
-import com.pxrs.model.ConsumerInfo;
-import com.pxrs.model.PartitionState;
+import com.pxrs.shared.ConsumerInfo;
+import com.pxrs.shared.PartitionState;
 import com.pxrs.store.RegistryStore;
 
 import java.util.*;

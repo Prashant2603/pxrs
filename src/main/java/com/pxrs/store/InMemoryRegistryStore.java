@@ -1,7 +1,7 @@
 package com.pxrs.store;
 
-import com.pxrs.model.ConsumerInfo;
-import com.pxrs.model.PartitionState;
+import com.pxrs.shared.ConsumerInfo;
+import com.pxrs.shared.PartitionState;
 
 import java.util.ArrayList;
 import java.util.List;

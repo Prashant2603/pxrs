@@ -1,11 +1,13 @@
 package com.pxrs.demo;
 
-import com.pxrs.config.PxrsConfig;
+import com.pxrs.shared.ModuloPartitionStrategy;
+import com.pxrs.shared.PartitionQueues;
+import com.pxrs.shared.PartitionState;
+import com.pxrs.shared.PxrsConfig;
+import com.pxrs.consumer.ConsumerEngine;
 import com.pxrs.consumer.SimpleConsumer;
 import com.pxrs.coordination.ConsumerCoordinator;
 import com.pxrs.coordination.PartitionManager;
-import com.pxrs.model.PartitionState;
-import com.pxrs.partition.ModuloPartitionStrategy;
 import com.pxrs.producer.SimpleProducer;
 import com.pxrs.store.EtcdRegistryStore;
 import com.pxrs.store.InMemoryRegistryStore;
@@ -55,29 +57,30 @@ public class PxrsDemo {
         PartitionManager partitionManager = new PartitionManager(store, numPartitions);
         ConsumerCoordinator coordinator = new ConsumerCoordinator(store, partitionManager, config);
 
-        // 3. Create producer
-        SimpleProducer producer = new SimpleProducer(new ModuloPartitionStrategy(), numPartitions);
+        // 3. Create partition queues and producer
+        PartitionQueues partitionQueues = new PartitionQueues(numPartitions);
+        SimpleProducer producer = new SimpleProducer(new ModuloPartitionStrategy(), numPartitions, partitionQueues);
 
-        // 4. Start 3 consumers
+        // 4. Create 3 consumers with engines
+        List<ConsumerEngine> engines = new ArrayList<>();
         List<SimpleConsumer> consumers = new ArrayList<>();
         for (int i = 0; i < 3; i++) {
-            SimpleConsumer consumer = new SimpleConsumer(
-                    "consumer-" + (char) ('A' + i), store, producer, coordinator);
+            String consumerId = "consumer-" + (char) ('A' + i);
+            SimpleConsumer consumer = new SimpleConsumer(consumerId, partitionQueues, producer, store);
+            ConsumerEngine engine = new ConsumerEngine(consumer, store);
             consumers.add(consumer);
+            engines.add(engine);
+            coordinator.addConsumer(engine);
         }
 
+        // 5. Initial rebalance to assign partitions and start consume threads
         System.out.println("--- Starting consumers ---");
-        for (SimpleConsumer c : consumers) {
-            c.start();
-        }
-
-        // 5. Initial rebalance to assign partitions
         coordinator.triggerRebalance();
         Thread.sleep(500);
 
         printAssignments(store, numPartitions);
 
-        // 6. Producer sends 100 messages
+        // 6. Producer sends 100 messages — consumers take() instantly
         System.out.println("\n--- Sending 100 messages ---");
         for (int i = 0; i < 100; i++) {
             producer.send("account-" + i, "payload-" + i);
@@ -93,7 +96,8 @@ public class PxrsDemo {
 
         // 8. Print stats
         System.out.println("\n--- Stats after processing ---");
-        for (SimpleConsumer c : consumers) {
+        for (int i = 0; i < consumers.size(); i++) {
+            SimpleConsumer c = consumers.get(i);
             List<Integer> assigned = coordinator.getAssignedPartitions(c.getConsumerId());
             System.out.println(c.getConsumerId() + ": processed=" + c.getMessagesProcessed() +
                     " partitions=" + assigned);
@@ -102,7 +106,7 @@ public class PxrsDemo {
 
         // 9. Stop one consumer — show rebalancing
         System.out.println("\n--- Stopping consumer-A (simulating crash) ---");
-        consumers.get(0).stop();
+        coordinator.removeConsumer(engines.get(0));
         Thread.sleep(500);
 
         System.out.println("Triggering rebalance...");
@@ -137,8 +141,8 @@ public class PxrsDemo {
 
         // Shutdown
         System.out.println("\n--- Shutting down ---");
-        for (int i = 1; i < consumers.size(); i++) {
-            consumers.get(i).stop();
+        for (int i = 1; i < engines.size(); i++) {
+            coordinator.removeConsumer(engines.get(i));
         }
         coordinator.stop();
         store.close();
