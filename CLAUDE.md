@@ -12,16 +12,18 @@ PXRS (Partitioned Registry Store) is a Java 17 / Maven project implementing virt
 - **Testing**: JUnit 4.13.2, 33 tests all passing
 - **No Spring/framework dependencies** — pure Java with minimal deps
 - **No polling**: consumers block on `BlockingQueue.take()` via `PartitionQueues` for instant message delivery
-- **Push-based assignments**: coordinator diffs partition ownership and pushes assign/revoke to `ConsumerEngine`
+- **Push-based assignments**: coordinator diffs partition ownership and pushes assign/revoke to `Consumer`
+- **Self-driving consumers**: consumers manage their own lifecycle (initialize → subscribe → stop), no separate engine layer
 
 ## Architecture (Layered)
 
 ```
 Producer.send() → buffer + PartitionQueues.put()
                                 ↓
-ConsumerEngine (thread per partition) → Consumer.subscribe() → PartitionQueues.take() (blocking)
-                                ↑
-ConsumerCoordinator → rebalance → pushAssignments() → engine.onPartitionAssigned/Revoked
+SimpleConsumer (thread per partition) → consumeLoop() → PartitionQueues.take() (blocking)
+     ↑ initialize/subscribe/stop        ↑ onPartitionAssigned/Revoked (coordinator hooks)
+     ↓                                  ↑
+ConsumerCoordinator → rebalance → pushAssignments() → consumer.onPartitionAssigned/Revoked
                                 ↑
 PartitionManager → RegistryStore → Backend (etcd / ConcurrentHashMap)
 ```
@@ -53,22 +55,24 @@ src/main/java/com/pxrs/
 │   ├── Producer.java                — Interface: send, getNextMessage, getLatestOffset
 │   └── SimpleProducer.java          — In-memory buffer + PartitionQueues push on send()
 ├── consumer/
-│   ├── Consumer.java                — Interface: getConsumerId, subscribe(partitionId, checkpoint), unsubscribe(partitionId), checkpoint(partitionId, offset)
-│   ├── SimpleConsumer.java          — Blocking subscribe: replay from producer, then take() from PartitionQueues; epoch-fenced checkpoints
-│   └── ConsumerEngine.java          — Thread-per-partition lifecycle: onPartitionAssigned spawns thread, onPartitionRevoked interrupts
+│   ├── Consumer.java                — Interface: initialize, subscribe, stop, onPartitionAssigned/Revoked (coordinator hooks), getMessagesProcessed
+│   └── SimpleConsumer.java          — Self-driving consumer: manages own threads, blocking consume loop, epoch-fenced checkpoints, coordinator lifecycle
 ├── coordination/
 │   ├── PartitionManager.java        — Fair-share rebalance (P/C base + remainder), reclaimExpiredPartitions
-│   └── ConsumerCoordinator.java     — Push-based: manages engines, diffs assignments, calls onPartitionAssigned/Revoked, handles heartbeats
+│   └── ConsumerCoordinator.java     — Push-based: manages consumers, diffs assignments, calls onPartitionAssigned/Revoked, handles heartbeats
 └── demo/PxrsDemo.java               — 3 consumers, 8 partitions, 150 messages, crash + rebalance demo
 ```
 
 ## Critical Interfaces
 
-### Consumer (decoupled — no infrastructure concerns)
+### Consumer (self-driving lifecycle)
 - `getConsumerId()` → String
-- `subscribe(partitionId, checkpoint)` → void (BLOCKING — runs consume loop)
-- `unsubscribe(partitionId)` → void (signals subscribe to stop)
-- `checkpoint(partitionId, offset)` → void (epoch-fenced persist)
+- `initialize()` → void (registers with coordinator)
+- `subscribe()` → void (triggers rebalance, starts consuming)
+- `stop()` → void (stops all threads, deregisters from coordinator)
+- `onPartitionAssigned(partitionId)` → void (coordinator hook: spawn consume thread)
+- `onPartitionRevoked(partitionId)` → void (coordinator hook: stop consume thread)
+- `getMessagesProcessed()` → int
 
 ### RegistryStore (the swappable coordination layer)
 - `initialize(numPartitions)` / `close()`
@@ -82,23 +86,25 @@ src/main/java/com/pxrs/
 
 ## Key Mechanisms
 
-### Blocking Subscribe (no polling)
-- `subscribe(partitionId, checkpoint)` is BLOCKING — called by ConsumerEngine on a dedicated thread
+### Blocking Consume Loop (no polling)
+- `consumeLoop(partitionId, checkpoint)` is BLOCKING — called internally on a dedicated thread per partition
 - Phase 1 (replay): loops `producer.getNextMessage(partitionId, offset++)` until null
 - Phase 2 (live): blocks on `partitionQueues.take(partitionId)` — instant delivery, no sleep/poll
-- On `unsubscribe()`: AtomicBoolean flag set false, thread interrupted → subscribe returns
+- On `onPartitionRevoked()`: AtomicBoolean flag set false, thread interrupted → consumeLoop returns
 
-### ConsumerEngine (thread-per-partition)
-- `onPartitionAssigned(partitionId)`: reads checkpoint from store, spawns daemon thread calling `consumer.subscribe()`
-- `onPartitionRevoked(partitionId)`: calls `consumer.unsubscribe()`, interrupts thread, joins with timeout
-- `stop()`: unsubscribes and interrupts all partition threads
+### Self-Driving Consumer (thread-per-partition)
+- `initialize()`: registers with coordinator via `coordinator.addConsumer(this)`
+- `subscribe()`: triggers rebalance via `coordinator.triggerRebalance()` — coordinator pushes assignments via hooks
+- `onPartitionAssigned(partitionId)`: reads checkpoint from store, spawns daemon thread running `consumeLoop()`
+- `onPartitionRevoked(partitionId)`: sets active flag false, interrupts thread, joins with 5s timeout
+- `stop()`: stops all partition threads internally, then calls `coordinator.removeConsumer(this)` for store cleanup
 
 ### Push-Based Assignments (ConsumerCoordinator)
-- `addConsumer(engine)`: registers in store, tracks engine
-- `removeConsumer(engine)`: stops engine, releases partitions, deregisters
-- `pushAssignments()`: after each rebalance, diffs current vs last assignment per engine
-  - Revokes removed partitions first (engine.onPartitionRevoked)
-  - Assigns new partitions second (engine.onPartitionAssigned)
+- `addConsumer(consumer)`: registers in store, tracks consumer
+- `removeConsumer(consumer)`: releases partitions, deregisters (does NOT call consumer.stop() — consumer drives its own shutdown)
+- `pushAssignments()`: after each rebalance, diffs current vs last assignment per consumer
+  - Revokes removed partitions first (consumer.onPartitionRevoked)
+  - Assigns new partitions second (consumer.onPartitionAssigned)
 - Periodic task: reclaimExpired → rebalance → pushAssignments → updateHeartbeats
 
 ### Epoch Fencing
@@ -134,23 +140,26 @@ mvn exec:java -Dexec.mainClass=com.pxrs.demo.PxrsDemo -Dexec.args="--etcd"  # et
 - `ModuloPartitionStrategyTest` (5) — range validation, determinism, distribution evenness
 - `PartitionManagerTest` (12) — fair-share computation, rebalance on join/leave/crash, checkpoint preservation across ownership changes
 
-## SimpleConsumer Subscribe Pattern
+## SimpleConsumer Lifecycle Pattern
 
 ```
-ConsumerEngine.onPartitionAssigned(partitionId):
-  checkpoint = store.getCheckpoint(partitionId)
-  spawn thread → consumer.subscribe(partitionId, checkpoint)
+consumer = new SimpleConsumer(id, partitionQueues, producer, store, coordinator)
+consumer.initialize()    → coordinator.addConsumer(this) → store.registerConsumer(id)
+consumer.subscribe()     → coordinator.triggerRebalance() → pushAssignments()
+                           → consumer.onPartitionAssigned(partitionId)
+                             → checkpoint = store.getCheckpoint(partitionId)
+                             → spawn thread → consumeLoop(partitionId, checkpoint)
 
-subscribe(partitionId, checkpoint):
+consumeLoop(partitionId, checkpoint):
   activePartitions.put(partitionId, AtomicBoolean(true))
-  1. Replay: while active → producer.getNextMessage(partitionId, offset++) → consumeMessage → checkpoint
-  2. Live:   while active → partitionQueues.take(partitionId) → consumeMessage → checkpoint
+  1. Replay: while active → producer.getNextMessage(partitionId, offset++) → consumeMessage → doCheckpoint
+  2. Live:   while active → partitionQueues.take(partitionId) → consumeMessage → doCheckpoint
   3. On InterruptedException or active=false → return
 
-unsubscribe(partitionId):
-  activePartitions.get(partitionId).set(false)
+consumer.stop()          → stop all partition threads, then coordinator.removeConsumer(this)
+                           → store.releaseAllPartitions(id) + store.deregisterConsumer(id)
 
-checkpoint(partitionId, offset):
+doCheckpoint(partitionId, offset):
   epoch = store.getPartitionState(partitionId).getVersionEpoch()
   if !store.updateCheckpoint(partitionId, consumerId, offset, epoch) → mark inactive
 ```
@@ -166,7 +175,7 @@ checkpoint(partitionId, offset):
 
 - SimpleProducer is in-memory only (no persistence/replication)
 - No EtcdRegistryStore tests (requires running etcd)
-- No end-to-end integration tests for SimpleConsumer/ConsumerEngine
+- No end-to-end integration tests for SimpleConsumer
 - etcd Watch API for real-time rebalance notifications not yet implemented
 - No backpressure or batching in consumer subscribe loop
 - `InMemoryRegistryStore.heartbeatTimeoutMs` is separate from `PxrsConfig.leaseTtlSeconds` (could be unified)

@@ -2,7 +2,7 @@ package com.pxrs.coordination;
 
 import com.pxrs.shared.PxrsConfig;
 import com.pxrs.shared.PartitionState;
-import com.pxrs.consumer.ConsumerEngine;
+import com.pxrs.consumer.Consumer;
 import com.pxrs.store.InMemoryRegistryStore;
 import com.pxrs.store.RegistryStore;
 
@@ -17,7 +17,7 @@ public class ConsumerCoordinator {
     private final RegistryStore store;
     private final PartitionManager partitionManager;
     private final PxrsConfig config;
-    private final Map<String, ConsumerEngine> engines = new ConcurrentHashMap<>();
+    private final Map<String, Consumer> consumers = new ConcurrentHashMap<>();
     private final Map<String, Set<Integer>> lastAssignment = new ConcurrentHashMap<>();
     private ScheduledExecutorService scheduler;
 
@@ -58,19 +58,18 @@ public class ConsumerCoordinator {
         }
     }
 
-    public void addConsumer(ConsumerEngine engine) {
-        String consumerId = engine.getConsumerId();
+    public void addConsumer(Consumer consumer) {
+        String consumerId = consumer.getConsumerId();
         store.registerConsumer(consumerId);
-        engines.put(consumerId, engine);
+        consumers.put(consumerId, consumer);
         lastAssignment.put(consumerId, new HashSet<>());
     }
 
-    public void removeConsumer(ConsumerEngine engine) {
-        String consumerId = engine.getConsumerId();
-        engine.stop();
+    public void removeConsumer(Consumer consumer) {
+        String consumerId = consumer.getConsumerId();
         store.releaseAllPartitions(consumerId);
         store.deregisterConsumer(consumerId);
-        engines.remove(consumerId);
+        consumers.remove(consumerId);
         lastAssignment.remove(consumerId);
     }
 
@@ -90,9 +89,9 @@ public class ConsumerCoordinator {
     }
 
     private void pushAssignments() {
-        for (Map.Entry<String, ConsumerEngine> entry : engines.entrySet()) {
+        for (Map.Entry<String, Consumer> entry : consumers.entrySet()) {
             String consumerId = entry.getKey();
-            ConsumerEngine engine = entry.getValue();
+            Consumer consumer = entry.getValue();
 
             Set<Integer> currentPartitions = new HashSet<>();
             for (PartitionState ps : store.getPartitionsOwnedBy(consumerId)) {
@@ -104,14 +103,14 @@ public class ConsumerCoordinator {
             // Revoke partitions no longer assigned
             for (int partitionId : previousPartitions) {
                 if (!currentPartitions.contains(partitionId)) {
-                    engine.onPartitionRevoked(partitionId);
+                    consumer.onPartitionRevoked(partitionId);
                 }
             }
 
             // Assign newly added partitions
             for (int partitionId : currentPartitions) {
                 if (!previousPartitions.contains(partitionId)) {
-                    engine.onPartitionAssigned(partitionId);
+                    consumer.onPartitionAssigned(partitionId);
                 }
             }
 
@@ -121,7 +120,7 @@ public class ConsumerCoordinator {
 
     private void updateHeartbeats() {
         if (store instanceof InMemoryRegistryStore memStore) {
-            for (Map.Entry<String, ConsumerEngine> entry : engines.entrySet()) {
+            for (Map.Entry<String, Consumer> entry : consumers.entrySet()) {
                 String consumerId = entry.getKey();
                 Set<Integer> partitions = lastAssignment.getOrDefault(consumerId, new HashSet<>());
                 for (int partitionId : partitions) {

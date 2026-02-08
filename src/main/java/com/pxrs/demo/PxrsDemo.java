@@ -4,7 +4,6 @@ import com.pxrs.shared.ModuloPartitionStrategy;
 import com.pxrs.shared.PartitionQueues;
 import com.pxrs.shared.PartitionState;
 import com.pxrs.shared.PxrsConfig;
-import com.pxrs.consumer.ConsumerEngine;
 import com.pxrs.consumer.SimpleConsumer;
 import com.pxrs.coordination.ConsumerCoordinator;
 import com.pxrs.coordination.PartitionManager;
@@ -61,21 +60,20 @@ public class PxrsDemo {
         PartitionQueues partitionQueues = new PartitionQueues(numPartitions);
         SimpleProducer producer = new SimpleProducer(new ModuloPartitionStrategy(), numPartitions, partitionQueues);
 
-        // 4. Create 3 consumers with engines
-        List<ConsumerEngine> engines = new ArrayList<>();
+        // 4. Create 3 self-driving consumers
         List<SimpleConsumer> consumers = new ArrayList<>();
         for (int i = 0; i < 3; i++) {
             String consumerId = "consumer-" + (char) ('A' + i);
-            SimpleConsumer consumer = new SimpleConsumer(consumerId, partitionQueues, producer, store);
-            ConsumerEngine engine = new ConsumerEngine(consumer, store);
+            SimpleConsumer consumer = new SimpleConsumer(consumerId, partitionQueues, producer, store, coordinator);
             consumers.add(consumer);
-            engines.add(engine);
-            coordinator.addConsumer(engine);
+            consumer.initialize();
         }
 
-        // 5. Initial rebalance to assign partitions and start consume threads
+        // 5. Subscribe all consumers — each triggers rebalance
         System.out.println("--- Starting consumers ---");
-        coordinator.triggerRebalance();
+        for (SimpleConsumer consumer : consumers) {
+            consumer.subscribe();
+        }
         Thread.sleep(500);
 
         printAssignments(store, numPartitions);
@@ -106,7 +104,7 @@ public class PxrsDemo {
 
         // 9. Stop one consumer — show rebalancing
         System.out.println("\n--- Stopping consumer-A (simulating crash) ---");
-        coordinator.removeConsumer(engines.get(0));
+        consumers.get(0).stop();
         Thread.sleep(500);
 
         System.out.println("Triggering rebalance...");
@@ -141,8 +139,8 @@ public class PxrsDemo {
 
         // Shutdown
         System.out.println("\n--- Shutting down ---");
-        for (int i = 1; i < engines.size(); i++) {
-            coordinator.removeConsumer(engines.get(i));
+        for (int i = 1; i < consumers.size(); i++) {
+            consumers.get(i).stop();
         }
         coordinator.stop();
         store.close();

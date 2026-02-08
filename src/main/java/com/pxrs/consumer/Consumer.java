@@ -4,9 +4,16 @@ public interface Consumer {
 
     String getConsumerId();
 
-    void subscribe(int partitionId, long checkpoint);
+    void initialize();
 
-    void unsubscribe(int partitionId);
+    void subscribe();
 
-    void checkpoint(int partitionId, long offset);
+    void stop();
+
+    // Coordinator hooks (called during rebalance)
+    void onPartitionAssigned(int partitionId);
+
+    void onPartitionRevoked(int partitionId);
+
+    int getMessagesProcessed();
 }

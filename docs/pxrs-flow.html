@@ -151,7 +151,7 @@
 
     <!-- Consumer layer -->
     <rect x="10" y="299" width="1080" height="150" rx="8" fill="#111827" opacity="0.5"/>
-    <text x="22" y="316" font-size="10" fill="#475569" font-weight="600" letter-spacing="1.5">CONSUMER ENGINES</text>
+    <text x="22" y="316" font-size="10" fill="#475569" font-weight="600" letter-spacing="1.5">CONSUMERS</text>
 
     <!-- Coordination + Store layer -->
     <rect x="10" y="456" width="1080" height="100" rx="8" fill="#0F1629" opacity="0.5"/>
@@ -215,10 +215,10 @@
     <line x1="640" y1="503" x2="680" y2="503" stroke="#475569" stroke-width="1" stroke-dasharray="4 3"/>
   </g>
 
-  <!-- Push-assignment arrows (coordinator to engines) -->
+  <!-- Push-assignment arrows (coordinator to consumers) -->
   <g id="push-arrows" opacity="0"></g>
 
-  <!-- Connector lines (partitions to consumers) -->
+  <!-- Connector lines (partitions to consumer threads) -->
   <g id="connectors"></g>
 
   <!-- Messages layer -->
@@ -237,11 +237,11 @@
     <line x1="350" y1="280" x2="750" y2="280" stroke="#334155" stroke-width="1"/>
     <text x="550" y="310" text-anchor="middle" font-size="13" fill="#94A3B8" font-weight="600">Architecture Highlights</text>
     <text x="550" y="338" text-anchor="middle" font-size="12" fill="#64748B">BlockingQueue per partition — no polling, instant take()</text>
-    <text x="550" y="360" text-anchor="middle" font-size="12" fill="#64748B">ConsumerEngine: thread-per-partition lifecycle</text>
+    <text x="550" y="360" text-anchor="middle" font-size="12" fill="#64748B">Self-driving Consumer: thread-per-partition lifecycle</text>
     <text x="550" y="382" text-anchor="middle" font-size="12" fill="#64748B">Push-based assignments via coordinator diff</text>
     <text x="550" y="404" text-anchor="middle" font-size="12" fill="#64748B">Epoch-fenced checkpointing prevents stale writes</text>
     <text x="550" y="426" text-anchor="middle" font-size="12" fill="#64748B">Fair-share rebalance with crash recovery</text>
-    <text x="550" y="460" text-anchor="middle" font-size="12" fill="#94A3B8">Producer &#8594; PartitionQueues &#8594; Consumer.take() &#8594; Checkpoint &#8594; Store</text>
+    <text x="550" y="460" text-anchor="middle" font-size="12" fill="#94A3B8">Producer &#8594; PartitionQueues &#8594; Consumer.consumeLoop() &#8594; Checkpoint &#8594; Store</text>
     <text x="550" y="492" text-anchor="middle" font-size="11" fill="#475569">github.com/pxrs</text>
   </g>
 </svg>
@@ -260,7 +260,7 @@ const COLORS = {
 const PARTITION_COUNT = 8;
 const PW = 105, PH = 155, PGAP = 9;
 const PSTART_X = 100;
-const CONSUMER_NAMES = ['Engine A', 'Engine B', 'Engine C'];
+const CONSUMER_NAMES = ['Consumer A', 'Consumer B', 'Consumer C'];
 const CONSUMER_COLORS = [COLORS.A, COLORS.B, COLORS.C];
 const CONSUMER_IDS = ['A', 'B', 'C'];
 
@@ -321,7 +321,7 @@ function buildConsumers() {
       <rect class="c-bg" x="0" y="0" width="${w}" height="110" rx="10" fill="${COLORS.bg}" stroke="${CONSUMER_COLORS[i]}" stroke-width="2"/>
       <circle class="c-heartbeat" cx="${w - 20}" cy="20" r="5" fill="${CONSUMER_COLORS[i]}" opacity="0.8"/>
       <text class="c-name" x="16" y="24" font-size="13" font-weight="600" fill="${CONSUMER_COLORS[i]}">${CONSUMER_NAMES[i]}</text>
-      <text class="c-sub" x="16" y="42" font-size="10" fill="#64748B">SimpleConsumer &middot; subscribe()</text>
+      <text class="c-sub" x="16" y="42" font-size="10" fill="#64748B">SimpleConsumer &middot; self-driving</text>
       <text class="c-threads-label" x="16" y="60" font-size="10" fill="${COLORS.dim}">threads: 0</text>
       <text class="c-processed" x="16" y="78" font-size="11" fill="${COLORS.dim}">processed: 0</text>
       <text class="c-partitions" x="16" y="96" font-size="10" fill="${COLORS.grey}"></text>
@@ -563,9 +563,9 @@ assignments3.forEach((pList, cIdx) => {
   });
 });
 
-// pushAssignments: show arrows from coordinator to engines
+// pushAssignments: show arrows from coordinator to consumers
 tl.call(() => {
-  setStatus('pushAssignments() → engines get onPartitionAssigned()');
+  setStatus('pushAssignments() → consumers get onPartitionAssigned()');
   document.getElementById('coord-status').textContent = 'pushAssignments()';
   for (let i = 0; i < 3; i++) {
     const arrow = drawPushArrow(i, CONSUMER_COLORS[i]);
@@ -606,7 +606,7 @@ tl.call(() => {
 
 tl.call(() => {
   document.getElementById('coord-status').textContent = 'running';
-  setStatus('Engines spawned threads — each subscribe() blocks on take()');
+  setStatus('Consumers spawned threads — each consumeLoop() blocks on take()');
 }, [], '+=0.4');
 
 // Heartbeat pulse animation
@@ -666,9 +666,9 @@ tl.call(() => setStatus(`${producerSent} messages queued — consumers blocked o
 
 // ========== SCENE 4: take() Consumption & Checkpointing ==========
 tl.addLabel('scene4', '+=0.6');
-tl.call(() => setStatus('Consumer threads: take() → consumeMessage → checkpoint (epoch-fenced)'), [], 'scene4');
+tl.call(() => setStatus('Consumer threads: consumeLoop() → take() → consumeMessage → doCheckpoint (epoch-fenced)'), [], 'scene4');
 
-// Animate consumption: dots flow from queue area to consumer engines
+// Animate consumption: dots flow from queue area to consumers
 function animateConsumption(pIdx, cIdx, count) {
   for (let m = 0; m < count; m++) {
     tl.call(() => {
@@ -731,7 +731,7 @@ tl.addPause('+=1.5');
 // ========== SCENE 5: Consumer A Crashes ==========
 tl.addLabel('scene5', '+=0.3');
 tl.call(() => {
-  setStatus('Consumer A crash — coordinator.removeConsumer(engineA)');
+  setStatus('Consumer A crash — consumerA.stop() → coordinator.removeConsumer()');
   document.getElementById('coord-status').textContent = 'crash detected!';
 }, [], 'scene5');
 
@@ -750,7 +750,7 @@ tl.to(consumerEls[0].querySelector('.c-bg'), { stroke: COLORS.crash, duration: 0
 tl.to(consumerEls[0], { x: -5, duration: 0.05, repeat: 5, yoyo: true }, '+=0.1');
 tl.to(consumerEls[0].querySelector('.c-name'), { fill: COLORS.crash, duration: 0.2 });
 tl.call(() => {
-  consumerEls[0].querySelector('.c-sub').textContent = 'threads interrupted';
+  consumerEls[0].querySelector('.c-sub').textContent = 'stopped — threads interrupted';
   consumerEls[0].querySelector('.c-sub').setAttribute('fill', COLORS.crash);
 });
 
@@ -783,7 +783,7 @@ tl.call(() => {
 
 tl.call(() => {
   document.getElementById('store-status').textContent = 'partitions released, checkpoints preserved';
-  setStatus('Engine A stopped — threads interrupted, partitions released. Checkpoints preserved.');
+  setStatus('Consumer A stopped — threads interrupted, partitions released. Checkpoints preserved.');
 }, [], '+=0.5');
 tl.addPause('+=1.5');
 
@@ -887,13 +887,13 @@ tl.call(() => {
 tl.call(() => {
   document.getElementById('coord-status').textContent = 'running';
   document.getElementById('store-status').textContent = 'checkpoints preserved';
-  setStatus('Rebalanced: B[0-3] C[4-7] — new threads spawned, subscribe() resumes from checkpoint');
+  setStatus('Rebalanced: B[0-3] C[4-7] — new threads spawned, consumeLoop() resumes from checkpoint');
 }, [], '+=0.4');
 tl.addPause('+=1.2');
 
 // ========== SCENE 7: Resumed Processing ==========
 tl.addLabel('scene7', '+=0.3');
-tl.call(() => setStatus('Engines spawn new threads → subscribe(partitionId, checkpoint) → replay then take()'), [], 'scene7');
+tl.call(() => setStatus('Consumers spawn new threads → consumeLoop(partitionId, checkpoint) → replay then take()'), [], 'scene7');
 
 // Highlight preserved checkpoints on P0-P2
 tl.call(() => {
@@ -1036,7 +1036,7 @@ btnRestart.addEventListener('click', () => {
     hb.setAttribute('cx', origPositions[i].w - 20);
     hb.setAttribute('r', '5');
     hb.setAttribute('fill', CONSUMER_COLORS[i]);
-    el.querySelector('.c-sub').textContent = 'SimpleConsumer \u00B7 subscribe()';
+    el.querySelector('.c-sub').textContent = 'SimpleConsumer \u00B7 self-driving';
     el.querySelector('.c-sub').setAttribute('fill', '#64748B');
     el.querySelector('.c-partitions').textContent = '';
   });
