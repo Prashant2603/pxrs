@@ -298,7 +298,8 @@ function buildPartitions() {
       <g class="p-queue-dots"></g>
       <text class="p-id" x="${PW/2}" y="${queueH + 18}" text-anchor="middle" font-size="14" font-weight="700" fill="${COLORS.dim}">P${i}</text>
       <text class="p-owner" x="${PW/2}" y="${queueH + 36}" text-anchor="middle" font-size="10" fill="${COLORS.grey}">unowned</text>
-      <text class="p-cp" x="${PW/2}" y="${queueH + 52}" text-anchor="middle" font-size="10" fill="${COLORS.dim}">cp: 0</text>
+      <rect class="p-cp-highlight" x="10" y="${queueH + 41}" width="${PW - 20}" height="14" rx="3" fill="#FCD34D" opacity="0"/>
+      <text class="p-cp" x="${PW/2}" y="${queueH + 52}" text-anchor="middle" font-size="11" font-weight="600" fill="${COLORS.dim}">cp: 0</text>
       <text class="p-epoch" x="${PW/2}" y="${queueH + 68}" text-anchor="middle" font-size="10" fill="${COLORS.dim}">epoch: 0</text>
     `;
     g.appendChild(pg);
@@ -359,8 +360,14 @@ function updatePartitionDisplay(pIdx) {
   const el = partitionEls[pIdx];
   const st = partitionState[pIdx];
   el.querySelector('.p-owner').textContent = st.owner ? `owner: ${st.owner}` : 'unowned';
-  el.querySelector('.p-cp').textContent = `cp: ${st.checkpoint}`;
+  const cpEl = el.querySelector('.p-cp');
+  const oldText = cpEl.textContent;
+  const newText = `cp: ${st.checkpoint}`;
+  cpEl.textContent = newText;
   el.querySelector('.p-epoch').textContent = `epoch: ${st.epoch}`;
+  if (newText !== oldText && st.checkpoint > 0) {
+    animateCheckpointFlash(pIdx);
+  }
   updateGlobalCheckpoint();
 }
 
@@ -470,9 +477,27 @@ function updateProducerCount() {
   document.getElementById('producer-count').textContent = `sent: ${producerSent}`;
 }
 
+let lastGlobalCheckpoint = 0;
+
 function updateGlobalCheckpoint() {
   const total = partitionState.reduce((sum, ps) => sum + ps.checkpoint, 0);
-  document.getElementById('global-cp-value').textContent = total;
+  const el = document.getElementById('global-cp-value');
+  el.textContent = total;
+  if (total > lastGlobalCheckpoint) {
+    lastGlobalCheckpoint = total;
+    gsap.killTweensOf(el);
+    gsap.fromTo(el, { fill: '#FFFFFF' }, { fill: '#FCD34D', duration: 0.4, ease: 'power1.out' });
+  }
+}
+
+function animateCheckpointFlash(pIdx) {
+  const el = partitionEls[pIdx];
+  const highlight = el.querySelector('.p-cp-highlight');
+  const cpText = el.querySelector('.p-cp');
+  gsap.killTweensOf(highlight);
+  gsap.killTweensOf(cpText);
+  gsap.fromTo(highlight, { opacity: 0.25 }, { opacity: 0, duration: 0.2, ease: 'power1.out' });
+  gsap.fromTo(cpText, { fill: '#FCD34D' }, { fill: COLORS.dim, duration: 0.5, ease: 'power1.out' });
 }
 
 // --- Build elements ---
@@ -724,7 +749,7 @@ tl.call(() => {
   }
 }, [], '+=0.3');
 
-tl.call(() => setStatus('All checkpoints epoch-fenced — store.updateCheckpoint(partitionId, consumerId, offset, epoch)'), [], '+=0.5');
+tl.call(() => setStatus('All checkpoints epoch-fenced — store.updateCheckpoint(partitionId, consumerId, checkpoint, epoch)'), [], '+=0.5');
 tl.addPause('+=1.5');
 
 // ========== SCENE 5: Consumer A Crashes ==========
@@ -947,7 +972,7 @@ animateResumedConsumption(5, 2, 2);
 animateResumedConsumption(6, 2, 2);
 animateResumedConsumption(7, 2, 2);
 
-tl.call(() => setStatus('All messages consumed from correct offsets — zero loss, zero duplication'), [], '+=0.5');
+tl.call(() => setStatus('All messages consumed from correct checkpoints — zero loss, zero duplication'), [], '+=0.5');
 
 // Final totals
 tl.call(() => {
@@ -995,6 +1020,12 @@ btnRestart.addEventListener('click', () => {
   updateProducerCount();
   partitionState.forEach((ps, i) => {
     ps.owner = null; ps.checkpoint = 0; ps.epoch = 0; ps.buffer = 0; ps.queueSize = 0;
+    const cpEl = partitionEls[i].querySelector('.p-cp');
+    const hlEl = partitionEls[i].querySelector('.p-cp-highlight');
+    gsap.killTweensOf(cpEl);
+    gsap.killTweensOf(hlEl);
+    cpEl.setAttribute('fill', COLORS.dim);
+    hlEl.setAttribute('opacity', '0');
     updatePartitionDisplay(i);
     setPartitionColor(i, COLORS.border);
     partitionEls[i].querySelector('.p-queue-dots').innerHTML = '';
@@ -1042,7 +1073,11 @@ btnRestart.addEventListener('click', () => {
   document.getElementById('coord-status').textContent = 'idle';
   document.getElementById('pm-status').textContent = '8 partitions';
   document.getElementById('store-status').textContent = 'initialized';
-  document.getElementById('global-cp-value').textContent = '0';
+  const gcpEl = document.getElementById('global-cp-value');
+  gsap.killTweensOf(gcpEl);
+  gcpEl.textContent = '0';
+  gcpEl.setAttribute('fill', '#FCD34D');
+  lastGlobalCheckpoint = 0;
 
   // Reset group opacities
   gsap.set(['#layer-bgs', '#partitions-group', '#consumers-group', '#connectors', '#push-arrows',
