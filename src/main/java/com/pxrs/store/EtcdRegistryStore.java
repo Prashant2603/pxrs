@@ -18,6 +18,8 @@ import io.etcd.jetcd.op.Op;
 import io.etcd.jetcd.options.GetOption;
 import io.etcd.jetcd.options.PutOption;
 
+import com.google.inject.Inject;
+
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -36,6 +38,7 @@ public class EtcdRegistryStore implements RegistryStore {
     private Lease leaseClient;
     private long leaseId;
 
+    @Inject
     public EtcdRegistryStore(PxrsConfig config) {
         this.config = config;
     }

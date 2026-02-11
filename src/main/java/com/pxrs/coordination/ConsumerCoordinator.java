@@ -6,12 +6,16 @@ import com.pxrs.consumer.Consumer;
 import com.pxrs.store.InMemoryRegistryStore;
 import com.pxrs.store.RegistryStore;
 
+import com.google.inject.Inject;
+import com.google.inject.Singleton;
+
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+@Singleton
 public class ConsumerCoordinator {
 
     private final RegistryStore store;
@@ -21,6 +25,7 @@ public class ConsumerCoordinator {
     private final Map<String, Set<Integer>> lastAssignment = new ConcurrentHashMap<>();
     private ScheduledExecutorService scheduler;
 
+    @Inject
     public ConsumerCoordinator(RegistryStore store, PartitionManager partitionManager, PxrsConfig config) {
         this.store = store;
         this.partitionManager = partitionManager;
@@ -36,14 +41,18 @@ public class ConsumerCoordinator {
 
         scheduler.scheduleAtFixedRate(() -> {
             try {
-                partitionManager.reclaimExpiredPartitions();
-                partitionManager.rebalance();
-                pushAssignments();
                 updateHeartbeats();
+                List<PartitionState> expired = store.getExpiredPartitions();
+                if (!expired.isEmpty()) {
+                    synchronized (this) {
+                        partitionManager.reclaimExpiredPartitions();
+                        rebalanceAndNotify();
+                    }
+                }
             } catch (Exception e) {
-                System.err.println("[ConsumerCoordinator] Rebalance error: " + e.getMessage());
+                System.err.println("[ConsumerCoordinator] Health monitor error: " + e.getMessage());
             }
-        }, 0, config.getRebalanceIntervalMs(), TimeUnit.MILLISECONDS);
+        }, config.getRebalanceIntervalMs(), config.getRebalanceIntervalMs(), TimeUnit.MILLISECONDS);
     }
 
     public void stop() {
@@ -58,25 +67,33 @@ public class ConsumerCoordinator {
         }
     }
 
-    public void addConsumer(Consumer consumer) {
+    public synchronized void register(Consumer consumer) {
         String consumerId = consumer.getConsumerId();
         store.registerConsumer(consumerId);
         consumers.put(consumerId, consumer);
         lastAssignment.put(consumerId, new HashSet<>());
+
+        partitionManager.reclaimExpiredPartitions();
+        rebalanceAndNotify();
     }
 
-    public void removeConsumer(Consumer consumer) {
+    public synchronized void deregister(Consumer consumer) {
         String consumerId = consumer.getConsumerId();
         store.releaseAllPartitions(consumerId);
         store.deregisterConsumer(consumerId);
         consumers.remove(consumerId);
         lastAssignment.remove(consumerId);
+
+        rebalanceAndNotify();
     }
 
-    public void triggerRebalance() {
-        partitionManager.reclaimExpiredPartitions();
-        partitionManager.rebalance();
-        pushAssignments();
+    public boolean commitCheckpoint(String consumerId, int partitionId, long offset) {
+        PartitionState ps = store.getPartitionState(partitionId);
+        if (ps == null) {
+            return false;
+        }
+        long epoch = ps.getVersionEpoch();
+        return store.updateCheckpoint(partitionId, consumerId, offset, epoch);
     }
 
     public List<Integer> getAssignedPartitions(String consumerId) {
@@ -88,33 +105,59 @@ public class ConsumerCoordinator {
         return ids;
     }
 
-    private void pushAssignments() {
+    private void rebalanceAndNotify() {
+        partitionManager.rebalance();
+
+        // Compute current store assignments per tracked consumer
+        Map<String, Set<Integer>> currentAssignments = new HashMap<>();
+        for (String consumerId : consumers.keySet()) {
+            Set<Integer> owned = new HashSet<>();
+            for (PartitionState ps : store.getPartitionsOwnedBy(consumerId)) {
+                owned.add(ps.getPartitionId());
+            }
+            currentAssignments.put(consumerId, owned);
+        }
+
+        // Phase 1: revoke lost partitions from all consumers (synchronous — consumers commit checkpoints)
+        Map<String, Set<Integer>> revokedPerConsumer = new HashMap<>();
         for (Map.Entry<String, Consumer> entry : consumers.entrySet()) {
             String consumerId = entry.getKey();
             Consumer consumer = entry.getValue();
+            Set<Integer> previous = lastAssignment.getOrDefault(consumerId, new HashSet<>());
+            Set<Integer> current = currentAssignments.getOrDefault(consumerId, new HashSet<>());
 
-            Set<Integer> currentPartitions = new HashSet<>();
-            for (PartitionState ps : store.getPartitionsOwnedBy(consumerId)) {
-                currentPartitions.add(ps.getPartitionId());
+            Set<Integer> lost = new HashSet<>(previous);
+            lost.removeAll(current);
+
+            if (!lost.isEmpty()) {
+                consumer.onPartitionsRevoked(lost);
+                revokedPerConsumer.put(consumerId, lost);
+                // Update lastAssignment immediately after revocation
+                Set<Integer> updated = new HashSet<>(previous);
+                updated.removeAll(lost);
+                lastAssignment.put(consumerId, updated);
             }
+        }
 
-            Set<Integer> previousPartitions = lastAssignment.getOrDefault(consumerId, new HashSet<>());
+        // Phase 2: assign new partitions to all consumers (with checkpoints from store)
+        for (Map.Entry<String, Consumer> entry : consumers.entrySet()) {
+            String consumerId = entry.getKey();
+            Consumer consumer = entry.getValue();
+            Set<Integer> previous = lastAssignment.getOrDefault(consumerId, new HashSet<>());
+            Set<Integer> current = currentAssignments.getOrDefault(consumerId, new HashSet<>());
 
-            // Revoke partitions no longer assigned
-            for (int partitionId : previousPartitions) {
-                if (!currentPartitions.contains(partitionId)) {
-                    consumer.onPartitionRevoked(partitionId);
+            Set<Integer> gained = new HashSet<>(current);
+            gained.removeAll(previous);
+
+            if (!gained.isEmpty()) {
+                Map<Integer, Long> partitionCheckpoints = new HashMap<>();
+                for (int partitionId : gained) {
+                    partitionCheckpoints.put(partitionId, store.getCheckpoint(partitionId));
                 }
+                consumer.onPartitionsAssigned(partitionCheckpoints);
             }
 
-            // Assign newly added partitions
-            for (int partitionId : currentPartitions) {
-                if (!previousPartitions.contains(partitionId)) {
-                    consumer.onPartitionAssigned(partitionId);
-                }
-            }
-
-            lastAssignment.put(consumerId, currentPartitions);
+            lastAssignment.put(consumerId, current);
         }
     }
 

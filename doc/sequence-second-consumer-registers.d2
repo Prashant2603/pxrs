@@ -1,0 +1,38 @@
+title: {
+  label: Second Consumer Registers (revoke-then-assign handoff)
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+shape: sequence_diagram
+
+Consumer1
+Consumer2
+Coordinator
+Store
+
+Consumer2 -> Coordinator: register(this)
+Coordinator -> Store: registerConsumer(C2)
+Coordinator -> Store: reclaimExpiredPartitions()
+Coordinator -> Store: rebalance() — releases C1 excess, claims for C2
+
+phase_1_revoke: {
+  label: "Phase 1: Revoke"
+  Coordinator -> Consumer1: onPartitionsRevoked({4,5,6,7})
+  Consumer1 -> Consumer1: finish work, stop threads
+  Consumer1 -> Coordinator: commitCheckpoint(C1, 4, offset)
+  Consumer1 -> Coordinator: commitCheckpoint(C1, 5, offset)
+  Consumer1 -> Coordinator: commitCheckpoint(C1, 6, offset)
+  Consumer1 -> Coordinator: commitCheckpoint(C1, 7, offset)
+  Coordinator -> Store: updateCheckpoint(4..7, C1, offset, epoch)
+}
+
+phase_2_assign: {
+  label: "Phase 2: Assign"
+  Coordinator -> Store: getCheckpoint(4), getCheckpoint(5), ...
+  Store -> Coordinator: checkpoints for {4,5,6,7}
+  Coordinator -> Consumer2: onPartitionsAssigned({4:ckpt, 5:ckpt, 6:ckpt, 7:ckpt})
+  Consumer2 -> Consumer2: start threads from saved checkpoints
+}

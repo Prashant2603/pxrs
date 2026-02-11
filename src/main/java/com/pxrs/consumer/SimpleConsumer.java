@@ -2,34 +2,32 @@ package com.pxrs.consumer;
 
 import com.pxrs.shared.Message;
 import com.pxrs.shared.PartitionQueues;
-import com.pxrs.shared.PartitionState;
 import com.pxrs.producer.Producer;
-import com.pxrs.store.RegistryStore;
 import com.pxrs.coordination.ConsumerCoordinator;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class SimpleConsumer implements Consumer {
 
     private final String consumerId;
     private final PartitionQueues partitionQueues;
     private final Producer producer;
-    private final RegistryStore store;
     private final ConsumerCoordinator coordinator;
     private final Map<Integer, AtomicBoolean> activePartitions = new ConcurrentHashMap<>();
     private final Map<Integer, Thread> partitionThreads = new ConcurrentHashMap<>();
+    private final Map<Integer, AtomicLong> partitionOffsets = new ConcurrentHashMap<>();
     private final AtomicInteger messagesProcessed = new AtomicInteger(0);
 
     public SimpleConsumer(String consumerId, PartitionQueues partitionQueues,
-                          Producer producer, RegistryStore store,
-                          ConsumerCoordinator coordinator) {
+                          Producer producer, ConsumerCoordinator coordinator) {
         this.consumerId = consumerId;
         this.partitionQueues = partitionQueues;
         this.producer = producer;
-        this.store = store;
         this.coordinator = coordinator;
     }
 
@@ -39,63 +37,78 @@ public class SimpleConsumer implements Consumer {
     }
 
     @Override
-    public void initialize() {
-        coordinator.addConsumer(this);
+    public void onPartitionsAssigned(Map<Integer, Long> partitionCheckpoints) {
+        for (Map.Entry<Integer, Long> entry : partitionCheckpoints.entrySet()) {
+            int partitionId = entry.getKey();
+            long checkpoint = entry.getValue();
+            partitionOffsets.put(partitionId, new AtomicLong(checkpoint));
+            Thread thread = new Thread(
+                    () -> consumeLoop(partitionId, checkpoint),
+                    "consumer-" + consumerId + "-p" + partitionId
+            );
+            thread.setDaemon(true);
+            partitionThreads.put(partitionId, thread);
+            thread.start();
+        }
     }
 
     @Override
-    public void subscribe() {
-        coordinator.triggerRebalance();
-    }
-
-    @Override
-    public void stop() {
-        for (int partitionId : partitionThreads.keySet()) {
+    public void onPartitionsRevoked(Set<Integer> partitions) {
+        // Stop threads for revoked partitions
+        for (int partitionId : partitions) {
             AtomicBoolean active = activePartitions.get(partitionId);
             if (active != null) {
                 active.set(false);
             }
         }
-        for (Map.Entry<Integer, Thread> entry : partitionThreads.entrySet()) {
-            Thread thread = entry.getValue();
-            thread.interrupt();
-            try {
-                thread.join(5000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+        for (int partitionId : partitions) {
+            Thread thread = partitionThreads.remove(partitionId);
+            if (thread != null) {
+                thread.interrupt();
+                try {
+                    thread.join(5000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
         }
-        partitionThreads.clear();
-        coordinator.removeConsumer(this);
+        // Commit final checkpoints to coordinator
+        for (int partitionId : partitions) {
+            AtomicLong offset = partitionOffsets.remove(partitionId);
+            if (offset != null) {
+                coordinator.commitCheckpoint(consumerId, partitionId, offset.get());
+            }
+            activePartitions.remove(partitionId);
+        }
     }
 
     @Override
-    public void onPartitionAssigned(int partitionId) {
-        long checkpoint = store.getCheckpoint(partitionId);
-        Thread thread = new Thread(
-                () -> consumeLoop(partitionId, checkpoint),
-                "consumer-" + consumerId + "-p" + partitionId
-        );
-        thread.setDaemon(true);
-        partitionThreads.put(partitionId, thread);
-        thread.start();
-    }
-
-    @Override
-    public void onPartitionRevoked(int partitionId) {
-        AtomicBoolean active = activePartitions.get(partitionId);
-        if (active != null) {
-            active.set(false);
-        }
-        Thread thread = partitionThreads.remove(partitionId);
-        if (thread != null) {
-            thread.interrupt();
-            try {
-                thread.join(5000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+    public void stop() {
+        // Stop all partition threads and commit final checkpoints
+        Set<Integer> allPartitions = Set.copyOf(partitionThreads.keySet());
+        for (int partitionId : allPartitions) {
+            AtomicBoolean active = activePartitions.get(partitionId);
+            if (active != null) {
+                active.set(false);
             }
         }
+        for (int partitionId : allPartitions) {
+            Thread thread = partitionThreads.remove(partitionId);
+            if (thread != null) {
+                thread.interrupt();
+                try {
+                    thread.join(5000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            AtomicLong offset = partitionOffsets.remove(partitionId);
+            if (offset != null) {
+                coordinator.commitCheckpoint(consumerId, partitionId, offset.get());
+            }
+            activePartitions.remove(partitionId);
+        }
+        coordinator.deregister(this);
     }
 
     @Override
@@ -140,12 +153,11 @@ public class SimpleConsumer implements Consumer {
     }
 
     private void doCheckpoint(int partitionId, long offset) {
-        PartitionState ps = store.getPartitionState(partitionId);
-        if (ps == null) {
-            return;
+        AtomicLong tracked = partitionOffsets.get(partitionId);
+        if (tracked != null) {
+            tracked.set(offset);
         }
-        long epoch = ps.getVersionEpoch();
-        boolean updated = store.updateCheckpoint(partitionId, consumerId, offset, epoch);
+        boolean updated = coordinator.commitCheckpoint(consumerId, partitionId, offset);
         if (!updated) {
             // Epoch mismatch — lost ownership
             AtomicBoolean active = activePartitions.get(partitionId);

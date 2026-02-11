@@ -1,6 +1,7 @@
 package com.pxrs.coordination;
 
 import com.pxrs.shared.PartitionState;
+import com.pxrs.shared.PxrsConfig;
 import com.pxrs.store.InMemoryRegistryStore;
 import org.junit.After;
 import org.junit.Before;
@@ -21,7 +22,8 @@ public class PartitionManagerTest {
     public void setUp() {
         store = new InMemoryRegistryStore(500);
         store.initialize(8);
-        manager = new PartitionManager(store, 8);
+        PxrsConfig config = PxrsConfig.builder().numPartitions(8).build();
+        manager = new PartitionManager(store, config);
     }
 
     @After

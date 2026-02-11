@@ -1,15 +1,15 @@
 package com.pxrs.demo;
 
-import com.pxrs.shared.ModuloPartitionStrategy;
-import com.pxrs.shared.PartitionQueues;
+import com.google.inject.Guice;
+import com.google.inject.Injector;
+import com.pxrs.PxrsModule;
 import com.pxrs.shared.PartitionState;
 import com.pxrs.shared.PxrsConfig;
+import com.pxrs.consumer.ConsumerFactory;
 import com.pxrs.consumer.SimpleConsumer;
 import com.pxrs.coordination.ConsumerCoordinator;
-import com.pxrs.coordination.PartitionManager;
+import com.pxrs.producer.Producer;
 import com.pxrs.producer.SimpleProducer;
-import com.pxrs.store.EtcdRegistryStore;
-import com.pxrs.store.InMemoryRegistryStore;
 import com.pxrs.store.RegistryStore;
 
 import java.util.ArrayList;
@@ -43,56 +43,48 @@ public class PxrsDemo {
         System.out.println("Store: " + (useEtcd ? "etcd" : "in-memory"));
         System.out.println();
 
-        // 1. Create store
-        RegistryStore store;
-        if (useEtcd) {
-            store = new EtcdRegistryStore(config);
-        } else {
-            store = new InMemoryRegistryStore(5000);
-        }
-        store.initialize(numPartitions);
+        // Create Guice injector
+        Injector injector = Guice.createInjector(new PxrsModule(config, useEtcd));
 
-        // 2. Create coordination
-        PartitionManager partitionManager = new PartitionManager(store, numPartitions);
-        ConsumerCoordinator coordinator = new ConsumerCoordinator(store, partitionManager, config);
+        // Get singletons
+        RegistryStore store = injector.getInstance(RegistryStore.class);
+        store.initialize(config.getNumPartitions());
 
-        // 3. Create partition queues and producer
-        PartitionQueues partitionQueues = new PartitionQueues(numPartitions);
-        SimpleProducer producer = new SimpleProducer(new ModuloPartitionStrategy(), numPartitions, partitionQueues);
+        ConsumerCoordinator coordinator = injector.getInstance(ConsumerCoordinator.class);
+        coordinator.start();
 
-        // 4. Create 3 self-driving consumers
+        ConsumerFactory consumerFactory = injector.getInstance(ConsumerFactory.class);
+        Producer producer = injector.getInstance(Producer.class);
+
+        // Create 3 consumers via factory and register with coordinator
         List<SimpleConsumer> consumers = new ArrayList<>();
+        System.out.println("--- Starting consumers ---");
         for (int i = 0; i < 3; i++) {
             String consumerId = "consumer-" + (char) ('A' + i);
-            SimpleConsumer consumer = new SimpleConsumer(consumerId, partitionQueues, producer, store, coordinator);
+            SimpleConsumer consumer = consumerFactory.create(consumerId);
             consumers.add(consumer);
-            consumer.initialize();
-        }
-
-        // 5. Subscribe all consumers — each triggers rebalance
-        System.out.println("--- Starting consumers ---");
-        for (SimpleConsumer consumer : consumers) {
-            consumer.subscribe();
+            coordinator.register(consumer);
         }
         Thread.sleep(500);
 
         printAssignments(store, numPartitions);
 
-        // 6. Producer sends 100 messages — consumers take() instantly
+        // Producer sends 100 messages — consumers take() instantly
         System.out.println("\n--- Sending 100 messages ---");
         for (int i = 0; i < 100; i++) {
             producer.send("account-" + i, "payload-" + i);
         }
         System.out.println("Messages sent. Partition buffer sizes:");
+        SimpleProducer simpleProducer = (SimpleProducer) producer;
         for (int i = 0; i < numPartitions; i++) {
-            System.out.println("  Partition " + i + ": " + producer.getLatestOffset(i) + " messages");
+            System.out.println("  Partition " + i + ": " + simpleProducer.getLatestOffset(i) + " messages");
         }
 
-        // 7. Wait for consumers to process
+        // Wait for consumers to process
         System.out.println("\n--- Waiting for consumers to process ---");
         Thread.sleep(3000);
 
-        // 8. Print stats
+        // Print stats
         System.out.println("\n--- Stats after processing ---");
         for (int i = 0; i < consumers.size(); i++) {
             SimpleConsumer c = consumers.get(i);
@@ -102,13 +94,9 @@ public class PxrsDemo {
         }
         printCheckpoints(store, numPartitions);
 
-        // 9. Stop one consumer — show rebalancing
+        // Stop one consumer — show rebalancing
         System.out.println("\n--- Stopping consumer-A (simulating crash) ---");
         consumers.get(0).stop();
-        Thread.sleep(500);
-
-        System.out.println("Triggering rebalance...");
-        coordinator.triggerRebalance();
         Thread.sleep(1000);
 
         System.out.println("\n--- Assignments after rebalance ---");
@@ -121,7 +109,7 @@ public class PxrsDemo {
                     " partitions=" + assigned);
         }
 
-        // 10. Send more messages to show resumed processing
+        // Send more messages to show resumed processing
         System.out.println("\n--- Sending 50 more messages ---");
         for (int i = 100; i < 150; i++) {
             producer.send("account-" + i, "payload-" + i);

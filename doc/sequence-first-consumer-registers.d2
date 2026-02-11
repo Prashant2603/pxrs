@@ -1,0 +1,37 @@
+title: {
+  label: First Consumer Registers (no partitions claimed)
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+shape: sequence_diagram
+
+Consumer1
+Coordinator
+Store
+
+Consumer1 -> Coordinator: register(this)
+Coordinator -> Store: registerConsumer(C1)
+Coordinator -> Store: reclaimExpiredPartitions()
+Coordinator -> Store: rebalance() — claims all for C1
+
+Coordinator: {
+  read_checkpoints: {
+    label: read checkpoints
+  }
+}
+Coordinator.read_checkpoints -> Store: getCheckpoint(0..7)
+Store -> Coordinator.read_checkpoints: {0→0, 1→0, ..., 7→0}
+
+Coordinator -> Consumer1: onPartitionsAssigned({0:0, 1:0, ..., 7:0})
+
+Consumer1 -> Consumer1: start threads from given checkpoints
+
+processing: {
+  Consumer1 -> Consumer1: consumeLoop(partitionId, checkpoint)
+}
+
+Consumer1 -> Coordinator: commitCheckpoint(C1, partitionId, offset)
+Coordinator -> Store: updateCheckpoint(partitionId, C1, offset, epoch)

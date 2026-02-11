@@ -1,0 +1,33 @@
+title: {
+  label: Consumer Leaves (remaining consumer gains partitions)
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+shape: sequence_diagram
+
+Consumer1
+Consumer2
+Coordinator
+Store
+
+Consumer1 -> Consumer1: stop() — stops own threads, commits checkpoints
+
+Consumer1 -> Coordinator: deregister(this)
+Coordinator -> Store: releaseAllPartitions(C1)
+Coordinator -> Store: deregisterConsumer(C1)
+
+rebalance: {
+  label: "Rebalance remaining consumers"
+  Coordinator -> Store: rebalance() — assigns C1's partitions to C2
+}
+
+assign_gained: {
+  label: "Phase 2: Assign gained partitions"
+  Coordinator -> Store: getCheckpoint(0), getCheckpoint(1), ...
+  Store -> Coordinator: checkpoints for {0,1,2,3}
+  Coordinator -> Consumer2: onPartitionsAssigned({0:ckpt, 1:ckpt, 2:ckpt, 3:ckpt})
+  Consumer2 -> Consumer2: start threads for 0,1,2,3 from saved checkpoints
+}

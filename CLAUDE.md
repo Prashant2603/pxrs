@@ -9,11 +9,12 @@ PXRS (Partitioned Registry Store) is a Java 17 / Maven project implementing virt
 - **Language**: Java 17 (uses pattern matching for instanceof in ConsumerCoordinator)
 - **Build**: Maven (`pom.xml` at project root)
 - **Coordination backend**: etcd (via `jetcd-core:0.7.7`) as default, swappable via `RegistryStore` interface
-- **Testing**: JUnit 4.13.2, 33 tests all passing
-- **No Spring/framework dependencies** — pure Java with minimal deps
+- **DI**: Guice 7.0.0 — `PxrsModule` wires all services, `ConsumerFactory` creates consumers with runtime IDs
+- **Testing**: JUnit 4.13.2, 42 tests all passing
 - **No polling**: consumers block on `BlockingQueue.take()` via `PartitionQueues` for instant message delivery
-- **Push-based assignments**: coordinator diffs partition ownership and pushes assign/revoke to `Consumer`
-- **Self-driving consumers**: consumers manage their own lifecycle (initialize → subscribe → stop), no separate engine layer
+- **Coordinator-driven assignments**: coordinator is the single brain — registers consumers, computes fair-share, pushes revoke-then-assign with checkpoints
+- **Event-driven rebalancing**: rebalance only on membership changes (register/deregister/crash), no periodic full rebalance
+- **Consumers never touch the store**: checkpoints flow through coordinator (`commitCheckpoint`)
 
 ## Architecture (Layered)
 
@@ -21,58 +22,68 @@ PXRS (Partitioned Registry Store) is a Java 17 / Maven project implementing virt
 Producer.send() → buffer + PartitionQueues.put()
                                 ↓
 SimpleConsumer (thread per partition) → consumeLoop() → PartitionQueues.take() (blocking)
-     ↑ initialize/subscribe/stop        ↑ onPartitionAssigned/Revoked (coordinator hooks)
-     ↓                                  ↑
-ConsumerCoordinator → rebalance → pushAssignments() → consumer.onPartitionAssigned/Revoked
-                                ↑
+     ↑ onPartitionsAssigned/Revoked     ↑ coordinator pushes Map<partitionId, checkpoint>
+     ↓ commitCheckpoint(id, offset)     ↑
+ConsumerCoordinator → register/deregister → rebalanceAndNotify()
+     ↑ single brain                        ↑ revoke phase 1, assign phase 2
+     ↓                                     ↑
 PartitionManager → RegistryStore → Backend (etcd / ConcurrentHashMap)
 ```
 
 **Dependency rule:**
 ```
 Producer ──→ Shared ←── Consumer ←── Coordinator
-               ↑            ↑            ↑
-             Store ─────────┘────────────┘
+               ↑                          ↑
+             Store ──────────────────────┘
 ```
+Consumer has NO direct store dependency — all checkpoint reads/writes go through coordinator.
 
 ## Project Layout
 
 ```
 src/main/java/com/pxrs/
+├── PxrsModule.java                    — Guice AbstractModule: wires config, store, coordinator, producer, queues
 ├── shared/
 │   ├── PxrsConfig.java              — Builder-pattern config (numPartitions, leaseTtl, rebalanceInterval, etcdEndpoints, keyPrefix)
 │   ├── Message.java                 — Immutable (id, partitionKey, partitionId, payload, timestamp)
 │   ├── PartitionState.java          — Mutable with volatile fields (partitionId, ownerId, lastCheckpoint, versionEpoch, lastHeartbeat)
 │   ├── ConsumerInfo.java            — Mutable (consumerId, registeredAt, lastSeen)
 │   ├── PartitionStrategy.java       — Interface: int assignPartition(String key, int numPartitions)
-│   ├── ModuloPartitionStrategy.java — Math.abs(key.hashCode() % numPartitions)
-│   └── PartitionQueues.java         — Map<Integer, BlockingQueue<Message>> for instant producer→consumer delivery
+│   ├── ModuloPartitionStrategy.java — Math.abs(key.hashCode() % numPartitions), @Inject no-arg
+│   └── PartitionQueues.java         — Map<Integer, BlockingQueue<Message>>, @Inject from PxrsConfig
 ├── store/
 │   ├── RegistryStore.java           — THE core interface (lifecycle, consumer registry, partition state, CAS claim, release, checkpoint, zombie detection)
-│   ├── InMemoryRegistryStore.java   — ConcurrentHashMap + synchronized blocks, heartbeat-based zombie detection
-│   └── EtcdRegistryStore.java       — jetcd Txn CAS on modRevision, lease-based auto-expiry
+│   ├── InMemoryRegistryStore.java   — ConcurrentHashMap + synchronized blocks, @Inject from PxrsConfig (derives heartbeat from leaseTtl)
+│   └── EtcdRegistryStore.java       — jetcd Txn CAS on modRevision, lease-based auto-expiry, @Inject from PxrsConfig
 ├── producer/
 │   ├── Producer.java                — Interface: send, getNextMessage, getLatestOffset
-│   └── SimpleProducer.java          — In-memory buffer + PartitionQueues push on send()
+│   └── SimpleProducer.java          — In-memory buffer + PartitionQueues push on send(), @Inject from PxrsConfig
 ├── consumer/
-│   ├── Consumer.java                — Interface: initialize, subscribe, stop, onPartitionAssigned/Revoked (coordinator hooks), getMessagesProcessed
-│   └── SimpleConsumer.java          — Self-driving consumer: manages own threads, blocking consume loop, epoch-fenced checkpoints, coordinator lifecycle
+│   ├── Consumer.java                — Interface: getConsumerId, onPartitionsAssigned(Map), onPartitionsRevoked(Set), stop, getMessagesProcessed
+│   ├── SimpleConsumer.java          — Passive worker: coordinator-driven, checkpoints via coordinator.commitCheckpoint()
+│   └── ConsumerFactory.java         — @Singleton factory: create(consumerId) → SimpleConsumer (not Guice-managed)
 ├── coordination/
-│   ├── PartitionManager.java        — Fair-share rebalance (P/C base + remainder), reclaimExpiredPartitions
-│   └── ConsumerCoordinator.java     — Push-based: manages consumers, diffs assignments, calls onPartitionAssigned/Revoked, handles heartbeats
-└── demo/PxrsDemo.java               — 3 consumers, 8 partitions, 150 messages, crash + rebalance demo
+│   ├── PartitionManager.java        — Fair-share rebalance (P/C base + remainder), reclaimExpiredPartitions, @Inject from PxrsConfig
+│   └── ConsumerCoordinator.java     — The single brain: register/deregister/commitCheckpoint, event-driven rebalance, @Inject @Singleton
+└── demo/PxrsDemo.java               — Guice injector, ConsumerFactory, 3 consumers, 8 partitions, 150 messages, crash + rebalance demo
 ```
 
 ## Critical Interfaces
 
-### Consumer (self-driving lifecycle)
+### Consumer (coordinator-driven, passive worker)
 - `getConsumerId()` → String
-- `initialize()` → void (registers with coordinator)
-- `subscribe()` → void (triggers rebalance, starts consuming)
-- `stop()` → void (stops all threads, deregisters from coordinator)
-- `onPartitionAssigned(partitionId)` → void (coordinator hook: spawn consume thread)
-- `onPartitionRevoked(partitionId)` → void (coordinator hook: stop consume thread)
+- `onPartitionsAssigned(Map<Integer, Long> partitionCheckpoints)` → void (start consuming from given checkpoints)
+- `onPartitionsRevoked(Set<Integer> partitions)` → void (synchronous: finish work, commit final checkpoints, stop threads, return)
+- `stop()` → void (full shutdown: stops threads, commits checkpoints, calls coordinator.deregister)
 - `getMessagesProcessed()` → int
+
+### ConsumerCoordinator (the single brain)
+- `start()` → void (starts health monitor — heartbeats + zombie detection only)
+- `stop()` → void (shuts down scheduler)
+- `register(Consumer)` → void (synchronized: registers in store, rebalances, revoke-then-assign)
+- `deregister(Consumer)` → void (synchronized: releases partitions, deregisters, rebalances remaining)
+- `commitCheckpoint(consumerId, partitionId, offset)` → boolean (epoch-fenced, delegates to store)
+- `getAssignedPartitions(consumerId)` → List<Integer>
 
 ### RegistryStore (the swappable coordination layer)
 - `initialize(numPartitions)` / `close()`
@@ -90,34 +101,39 @@ src/main/java/com/pxrs/
 - `consumeLoop(partitionId, checkpoint)` is BLOCKING — called internally on a dedicated thread per partition
 - Phase 1 (replay): loops `producer.getNextMessage(partitionId, offset++)` until null
 - Phase 2 (live): blocks on `partitionQueues.take(partitionId)` — instant delivery, no sleep/poll
-- On `onPartitionRevoked()`: AtomicBoolean flag set false, thread interrupted → consumeLoop returns
+- On `onPartitionsRevoked()`: AtomicBoolean flag set false, thread interrupted → consumeLoop returns
 
-### Self-Driving Consumer (thread-per-partition)
-- `initialize()`: registers with coordinator via `coordinator.addConsumer(this)`
-- `subscribe()`: triggers rebalance via `coordinator.triggerRebalance()` — coordinator pushes assignments via hooks
-- `onPartitionAssigned(partitionId)`: reads checkpoint from store, spawns daemon thread running `consumeLoop()`
-- `onPartitionRevoked(partitionId)`: sets active flag false, interrupts thread, joins with 5s timeout
-- `stop()`: stops all partition threads internally, then calls `coordinator.removeConsumer(this)` for store cleanup
+### Coordinator-Driven Consumer Lifecycle
+- Consumer created via `ConsumerFactory.create(consumerId)` — NOT Guice-managed (runtime ID)
+- `coordinator.register(consumer)`: registers in store → rebalance → revoke-then-assign → consumer.onPartitionsAssigned(Map<partitionId, checkpoint>)
+- `consumer.onPartitionsAssigned(map)`: spawns daemon thread per partition running `consumeLoop(partitionId, checkpoint)` using provided checkpoints
+- `consumer.onPartitionsRevoked(set)`: sets active=false, interrupts threads, joins (5s timeout), commits final checkpoints via `coordinator.commitCheckpoint()` — **synchronous, blocks until done**
+- `consumer.stop()`: stops all threads, commits checkpoints, then calls `coordinator.deregister(this)` for store cleanup
 
-### Push-Based Assignments (ConsumerCoordinator)
-- `addConsumer(consumer)`: registers in store, tracks consumer
-- `removeConsumer(consumer)`: releases partitions, deregisters (does NOT call consumer.stop() — consumer drives its own shutdown)
-- `pushAssignments()`: after each rebalance, diffs current vs last assignment per consumer
-  - Revokes removed partitions first (consumer.onPartitionRevoked)
-  - Assigns new partitions second (consumer.onPartitionAssigned)
-- Periodic task: reclaimExpired → rebalance → pushAssignments → updateHeartbeats
+### Event-Driven Rebalancing (ConsumerCoordinator)
+- `register(consumer)` (synchronized): registerConsumer → reclaimExpired → rebalanceAndNotify()
+- `deregister(consumer)` (synchronized): releaseAll → deregisterConsumer → rebalanceAndNotify()
+- `rebalanceAndNotify()`: partitionManager.rebalance() → diff current vs lastAssignment per consumer
+  - **Phase 1 (revoke)**: call `consumer.onPartitionsRevoked(lostPartitions)` for all consumers that lost partitions — synchronous, consumers commit final checkpoints during this call
+  - **Phase 2 (assign)**: read checkpoints from store for gained partitions, call `consumer.onPartitionsAssigned(Map<partitionId, checkpoint>)` — consumers start from saved checkpoints
+- Health monitor (periodic): updateHeartbeats + check getExpiredPartitions — only triggers rebalanceAndNotify when zombies actually detected
+
+### Checkpoint Flow (through coordinator)
+- Consumer calls `coordinator.commitCheckpoint(consumerId, partitionId, offset)` during normal processing and during revocation flush
+- Coordinator delegates to `store.updateCheckpoint(partitionId, consumerId, offset, epoch)` with epoch-fencing
+- On failure (epoch mismatch), consumer marks partition inactive — stops consuming that partition
 
 ### Epoch Fencing
 - `versionEpoch` on PartitionState increments on every claim/release
 - Checkpoint updates require matching epoch — stale consumer gets rejected (returns false)
-- On failed checkpoint, consumer marks partition inactive → subscribe loop exits
+- On failed checkpoint, consumer marks partition inactive → consume loop exits
 
 ### CAS Claiming
 - **InMemory**: `synchronized` block checks epoch + unowned, then sets owner + bumps epoch
 - **etcd**: Txn API with `Cmp(modRevision == expected)` → linearizable CAS via Raft
 
 ### Zombie Detection
-- **InMemory**: `getExpiredPartitions()` checks if owner is deregistered OR heartbeat exceeds `heartbeatTimeoutMs`
+- **InMemory**: `getExpiredPartitions()` checks if owner is deregistered OR heartbeat exceeds `heartbeatTimeoutMs` (derived from `leaseTtlSeconds * 1000`)
 - **etcd**: Consumer key attached to lease with TTL → process death = lease expiry = key deleted → partition owner not in active consumers
 
 ### Fair-Share Rebalance
@@ -126,29 +142,53 @@ src/main/java/com/pxrs/
 - Sorted consumer IDs for deterministic assignment
 - Releases excess partitions first, then claims unowned ones
 
+## Guice Dependency Injection
+
+### PxrsModule
+- `PxrsConfig` bound as instance (pre-built)
+- `PartitionStrategy` → `ModuloPartitionStrategy` (Singleton)
+- `PartitionQueues` (Singleton, reads numPartitions from PxrsConfig)
+- `PartitionManager` (Singleton, reads numPartitions from PxrsConfig)
+- `ConsumerCoordinator` (Singleton)
+- `Producer` → `SimpleProducer` (Singleton, reads numPartitions from PxrsConfig)
+- `RegistryStore` → `InMemoryRegistryStore` or `EtcdRegistryStore` based on `useEtcd` flag
+
+### ConsumerFactory
+- @Singleton, @Inject constructor takes PartitionQueues, Producer, ConsumerCoordinator
+- `create(consumerId)` returns `SimpleConsumer` — not Guice-managed (has runtime consumerId)
+
 ## How to Build and Run
 
 ```bash
-mvn clean compile test          # Build + 33 tests
+mvn clean compile test          # Build + 42 tests
 mvn exec:java -Dexec.mainClass=com.pxrs.demo.PxrsDemo              # In-memory demo
 mvn exec:java -Dexec.mainClass=com.pxrs.demo.PxrsDemo -Dexec.args="--etcd"  # etcd demo (requires local etcd)
 ```
 
-## Tests (33 total, all passing)
+## Tests (42 total, all passing)
 
 - `InMemoryRegistryStoreTest` (16) — CAS races with CountDownLatch, epoch fencing, checkpoint preservation, zombie detection (deregistered + stale heartbeat)
 - `ModuloPartitionStrategyTest` (5) — range validation, determinism, distribution evenness
 - `PartitionManagerTest` (12) — fair-share computation, rebalance on join/leave/crash, checkpoint preservation across ownership changes
+- `ConsumerCoordinatorTest` (9) — register/deregister flows, revoke-before-assign ordering, checkpoint flow-through, fair-split verification, commitCheckpoint success/failure
 
-## SimpleConsumer Lifecycle Pattern
+## Consumer Lifecycle Pattern
 
 ```
-consumer = new SimpleConsumer(id, partitionQueues, producer, store, coordinator)
-consumer.initialize()    → coordinator.addConsumer(this) → store.registerConsumer(id)
-consumer.subscribe()     → coordinator.triggerRebalance() → pushAssignments()
-                           → consumer.onPartitionAssigned(partitionId)
-                             → checkpoint = store.getCheckpoint(partitionId)
-                             → spawn thread → consumeLoop(partitionId, checkpoint)
+// Setup (Guice)
+Injector injector = Guice.createInjector(new PxrsModule(config, useEtcd));
+ConsumerFactory factory = injector.getInstance(ConsumerFactory.class);
+ConsumerCoordinator coordinator = injector.getInstance(ConsumerCoordinator.class);
+
+// Create and register
+SimpleConsumer consumer = factory.create("consumer-A");
+coordinator.register(consumer)
+  → store.registerConsumer("consumer-A")
+  → reclaimExpired → rebalance → rebalanceAndNotify()
+    → Phase 1: revoke lost from existing consumers (synchronous)
+    → Phase 2: assign gained to all consumers with checkpoints
+      → consumer.onPartitionsAssigned({0:0, 1:0, ..., 7:0})
+        → spawn thread per partition → consumeLoop(partitionId, checkpoint)
 
 consumeLoop(partitionId, checkpoint):
   activePartitions.put(partitionId, AtomicBoolean(true))
@@ -156,12 +196,16 @@ consumeLoop(partitionId, checkpoint):
   2. Live:   while active → partitionQueues.take(partitionId) → consumeMessage → doCheckpoint
   3. On InterruptedException or active=false → return
 
-consumer.stop()          → stop all partition threads, then coordinator.removeConsumer(this)
-                           → store.releaseAllPartitions(id) + store.deregisterConsumer(id)
-
 doCheckpoint(partitionId, offset):
-  epoch = store.getPartitionState(partitionId).getVersionEpoch()
-  if !store.updateCheckpoint(partitionId, consumerId, offset, epoch) → mark inactive
+  partitionOffsets.get(partitionId).set(offset)  // track locally for revocation flush
+  if !coordinator.commitCheckpoint(consumerId, partitionId, offset) → mark inactive
+
+// Shutdown
+consumer.stop()
+  → stop all partition threads, commit final checkpoints
+  → coordinator.deregister(this)
+    → store.releaseAllPartitions(id) + store.deregisterConsumer(id)
+    → rebalanceAndNotify() for remaining consumers
 ```
 
 ## etcd Key Layout
@@ -177,13 +221,13 @@ doCheckpoint(partitionId, offset):
 - No EtcdRegistryStore tests (requires running etcd)
 - No end-to-end integration tests for SimpleConsumer
 - etcd Watch API for real-time rebalance notifications not yet implemented
-- No backpressure or batching in consumer subscribe loop
-- `InMemoryRegistryStore.heartbeatTimeoutMs` is separate from `PxrsConfig.leaseTtlSeconds` (could be unified)
+- No backpressure or batching in consumer consume loop
 - ConsumerCoordinator uses Java 17 pattern matching: `if (store instanceof InMemoryRegistryStore memStore)`
 
 ## Dependencies
 
 - `io.etcd:jetcd-core:0.7.7` (brings in gRPC, Netty, Protobuf transitively)
+- `com.google.inject:guice:7.0.0` (Guice DI)
 - `junit:junit:4.13.2` (test scope)
 - `org.codehaus.mojo:exec-maven-plugin:3.1.0` (for demo execution)
 

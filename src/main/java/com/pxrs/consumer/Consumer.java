@@ -1,19 +1,17 @@
 package com.pxrs.consumer;
 
+import java.util.Map;
+import java.util.Set;
+
 public interface Consumer {
 
     String getConsumerId();
 
-    void initialize();
+    void onPartitionsAssigned(Map<Integer, Long> partitionCheckpoints);
 
-    void subscribe();
+    void onPartitionsRevoked(Set<Integer> partitions);
 
     void stop();
-
-    // Coordinator hooks (called during rebalance)
-    void onPartitionAssigned(int partitionId);
-
-    void onPartitionRevoked(int partitionId);
 
     int getMessagesProcessed();
 }

@@ -2,6 +2,9 @@ package com.pxrs.store;
 
 import com.pxrs.shared.ConsumerInfo;
 import com.pxrs.shared.PartitionState;
+import com.pxrs.shared.PxrsConfig;
+
+import com.google.inject.Inject;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -12,6 +15,11 @@ public class InMemoryRegistryStore implements RegistryStore {
     private final ConcurrentHashMap<Integer, PartitionState> partitions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ConsumerInfo> consumers = new ConcurrentHashMap<>();
     private final long heartbeatTimeoutMs;
+
+    @Inject
+    public InMemoryRegistryStore(PxrsConfig config) {
+        this(config.getLeaseTtlSeconds() * 1000);
+    }
 
     public InMemoryRegistryStore(long heartbeatTimeoutMs) {
         this.heartbeatTimeoutMs = heartbeatTimeoutMs;

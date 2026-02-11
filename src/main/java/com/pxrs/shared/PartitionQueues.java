@@ -1,13 +1,22 @@
 package com.pxrs.shared;
 
+import com.google.inject.Inject;
+import com.google.inject.Singleton;
+
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 
+@Singleton
 public class PartitionQueues {
 
     private final Map<Integer, BlockingQueue<Message>> queues;
+
+    @Inject
+    public PartitionQueues(PxrsConfig config) {
+        this(config.getNumPartitions());
+    }
 
     public PartitionQueues(int numPartitions) {
         queues = new ConcurrentHashMap<>();

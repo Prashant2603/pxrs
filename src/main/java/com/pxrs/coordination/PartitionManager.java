@@ -2,18 +2,24 @@ package com.pxrs.coordination;
 
 import com.pxrs.shared.ConsumerInfo;
 import com.pxrs.shared.PartitionState;
+import com.pxrs.shared.PxrsConfig;
 import com.pxrs.store.RegistryStore;
+
+import com.google.inject.Inject;
+import com.google.inject.Singleton;
 
 import java.util.*;
 
+@Singleton
 public class PartitionManager {
 
     private final RegistryStore store;
     private final int numPartitions;
 
-    public PartitionManager(RegistryStore store, int numPartitions) {
+    @Inject
+    public PartitionManager(RegistryStore store, PxrsConfig config) {
         this.store = store;
-        this.numPartitions = numPartitions;
+        this.numPartitions = config.getNumPartitions();
     }
 
     public synchronized void rebalance() {

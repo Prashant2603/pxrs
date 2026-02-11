@@ -3,18 +3,28 @@ package com.pxrs.producer;
 import com.pxrs.shared.Message;
 import com.pxrs.shared.PartitionQueues;
 import com.pxrs.shared.PartitionStrategy;
+import com.pxrs.shared.PxrsConfig;
+
+import com.google.inject.Inject;
+import com.google.inject.Singleton;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+@Singleton
 public class SimpleProducer implements Producer {
 
     private final PartitionStrategy strategy;
     private final int numPartitions;
     private final PartitionQueues partitionQueues;
     private final ConcurrentHashMap<Integer, List<Message>> partitionBuffers = new ConcurrentHashMap<>();
+
+    @Inject
+    public SimpleProducer(PartitionStrategy strategy, PxrsConfig config, PartitionQueues partitionQueues) {
+        this(strategy, config.getNumPartitions(), partitionQueues);
+    }
 
     public SimpleProducer(PartitionStrategy strategy, int numPartitions, PartitionQueues partitionQueues) {
         this.strategy = strategy;
