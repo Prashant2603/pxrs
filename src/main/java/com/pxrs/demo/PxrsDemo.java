@@ -11,6 +11,7 @@ import com.pxrs.coordination.ConsumerCoordinator;
 import com.pxrs.producer.Producer;
 import com.pxrs.producer.SimpleProducer;
 import com.pxrs.store.RegistryStore;
+import com.pxrs.store.StoreType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,12 +19,14 @@ import java.util.List;
 public class PxrsDemo {
 
     public static void main(String[] args) throws Exception {
-        boolean useEtcd = false;
+        StoreType storeType = StoreType.IN_MEMORY;
         int numPartitions = 8;
 
         for (String arg : args) {
             if ("--etcd".equals(arg)) {
-                useEtcd = true;
+                storeType = StoreType.ETCD;
+            } else if ("--oracle".equals(arg)) {
+                storeType = StoreType.ORACLE;
             } else {
                 try {
                     numPartitions = Integer.parseInt(arg);
@@ -40,11 +43,11 @@ public class PxrsDemo {
 
         System.out.println("=== PXRS Demo ===");
         System.out.println("Config: " + config);
-        System.out.println("Store: " + (useEtcd ? "etcd" : "in-memory"));
+        System.out.println("Store: " + storeType);
         System.out.println();
 
         // Create Guice injector
-        Injector injector = Guice.createInjector(new PxrsModule(config, useEtcd));
+        Injector injector = Guice.createInjector(new PxrsModule(config, storeType));
 
         // Get singletons
         RegistryStore store = injector.getInstance(RegistryStore.class);

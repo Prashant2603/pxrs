@@ -12,16 +12,18 @@ import com.pxrs.shared.PartitionStrategy;
 import com.pxrs.shared.PxrsConfig;
 import com.pxrs.store.EtcdRegistryStore;
 import com.pxrs.store.InMemoryRegistryStore;
+import com.pxrs.store.OracleRegistryStore;
 import com.pxrs.store.RegistryStore;
+import com.pxrs.store.StoreType;
 
 public class PxrsModule extends AbstractModule {
 
     private final PxrsConfig config;
-    private final boolean useEtcd;
+    private final StoreType storeType;
 
-    public PxrsModule(PxrsConfig config, boolean useEtcd) {
+    public PxrsModule(PxrsConfig config, StoreType storeType) {
         this.config = config;
-        this.useEtcd = useEtcd;
+        this.storeType = storeType;
     }
 
     @Override
@@ -33,10 +35,10 @@ public class PxrsModule extends AbstractModule {
         bind(ConsumerCoordinator.class).in(Singleton.class);
         bind(Producer.class).to(SimpleProducer.class).in(Singleton.class);
 
-        if (useEtcd) {
-            bind(RegistryStore.class).to(EtcdRegistryStore.class).in(Singleton.class);
-        } else {
-            bind(RegistryStore.class).to(InMemoryRegistryStore.class).in(Singleton.class);
+        switch (storeType) {
+            case IN_MEMORY -> bind(RegistryStore.class).to(InMemoryRegistryStore.class).in(Singleton.class);
+            case ETCD -> bind(RegistryStore.class).to(EtcdRegistryStore.class).in(Singleton.class);
+            case ORACLE -> bind(RegistryStore.class).to(OracleRegistryStore.class).in(Singleton.class);
         }
     }
 }

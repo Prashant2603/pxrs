@@ -4,6 +4,7 @@ import com.pxrs.shared.PxrsConfig;
 import com.pxrs.shared.PartitionState;
 import com.pxrs.consumer.Consumer;
 import com.pxrs.store.InMemoryRegistryStore;
+import com.pxrs.store.OracleRegistryStore;
 import com.pxrs.store.RegistryStore;
 
 import com.google.inject.Inject;
@@ -168,6 +169,14 @@ public class ConsumerCoordinator {
                 Set<Integer> partitions = lastAssignment.getOrDefault(consumerId, new HashSet<>());
                 for (int partitionId : partitions) {
                     memStore.updateHeartbeat(consumerId, partitionId);
+                }
+            }
+        } else if (store instanceof OracleRegistryStore oracleStore) {
+            for (Map.Entry<String, Consumer> entry : consumers.entrySet()) {
+                String consumerId = entry.getKey();
+                Set<Integer> partitions = lastAssignment.getOrDefault(consumerId, new HashSet<>());
+                for (int partitionId : partitions) {
+                    oracleStore.updateHeartbeat(consumerId, partitionId);
                 }
             }
         }

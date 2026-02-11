@@ -7,6 +7,9 @@ public class PxrsConfig {
     private final long rebalanceIntervalMs;
     private final String etcdEndpoints;
     private final String keyPrefix;
+    private final String jdbcUrl;
+    private final String jdbcUsername;
+    private final String jdbcPassword;
 
     private PxrsConfig(Builder builder) {
         this.numPartitions = builder.numPartitions;
@@ -14,6 +17,9 @@ public class PxrsConfig {
         this.rebalanceIntervalMs = builder.rebalanceIntervalMs;
         this.etcdEndpoints = builder.etcdEndpoints;
         this.keyPrefix = builder.keyPrefix;
+        this.jdbcUrl = builder.jdbcUrl;
+        this.jdbcUsername = builder.jdbcUsername;
+        this.jdbcPassword = builder.jdbcPassword;
     }
 
     public int getNumPartitions() {
@@ -36,6 +42,18 @@ public class PxrsConfig {
         return keyPrefix;
     }
 
+    public String getJdbcUrl() {
+        return jdbcUrl;
+    }
+
+    public String getJdbcUsername() {
+        return jdbcUsername;
+    }
+
+    public String getJdbcPassword() {
+        return jdbcPassword;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -46,6 +64,9 @@ public class PxrsConfig {
         private long rebalanceIntervalMs = 10000;
         private String etcdEndpoints = "http://localhost:2379";
         private String keyPrefix = "/pxrs/";
+        private String jdbcUrl = "jdbc:oracle:thin:@localhost:1521/FREEPDB1";
+        private String jdbcUsername = "pxrs";
+        private String jdbcPassword = "pxrs";
 
         public Builder numPartitions(int numPartitions) {
             this.numPartitions = numPartitions;
@@ -72,6 +93,21 @@ public class PxrsConfig {
             return this;
         }
 
+        public Builder jdbcUrl(String jdbcUrl) {
+            this.jdbcUrl = jdbcUrl;
+            return this;
+        }
+
+        public Builder jdbcUsername(String jdbcUsername) {
+            this.jdbcUsername = jdbcUsername;
+            return this;
+        }
+
+        public Builder jdbcPassword(String jdbcPassword) {
+            this.jdbcPassword = jdbcPassword;
+            return this;
+        }
+
         public PxrsConfig build() {
             return new PxrsConfig(this);
         }
@@ -83,6 +119,7 @@ public class PxrsConfig {
                 ", leaseTtlSeconds=" + leaseTtlSeconds +
                 ", rebalanceIntervalMs=" + rebalanceIntervalMs +
                 ", etcdEndpoints='" + etcdEndpoints + "'" +
-                ", keyPrefix='" + keyPrefix + "'}";
+                ", keyPrefix='" + keyPrefix + "'" +
+                ", jdbcUrl='" + jdbcUrl + "'}";
     }
 }

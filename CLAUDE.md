@@ -8,7 +8,7 @@ PXRS (Partitioned Registry Store) is a Java 17 / Maven project implementing virt
 
 - **Language**: Java 17 (uses pattern matching for instanceof in ConsumerCoordinator)
 - **Build**: Maven (`pom.xml` at project root)
-- **Coordination backend**: etcd (via `jetcd-core:0.7.7`) as default, swappable via `RegistryStore` interface
+- **Coordination backend**: etcd (via `jetcd-core:0.7.7`), Oracle DB (via `ojdbc11`), or in-memory — swappable via `RegistryStore` interface and `StoreType` enum
 - **DI**: Guice 7.0.0 — `PxrsModule` wires all services, `ConsumerFactory` creates consumers with runtime IDs
 - **Testing**: JUnit 4.13.2, 42 tests all passing
 - **No polling**: consumers block on `BlockingQueue.take()` via `PartitionQueues` for instant message delivery
@@ -27,7 +27,7 @@ SimpleConsumer (thread per partition) → consumeLoop() → PartitionQueues.take
 ConsumerCoordinator → register/deregister → rebalanceAndNotify()
      ↑ single brain                        ↑ revoke phase 1, assign phase 2
      ↓                                     ↑
-PartitionManager → RegistryStore → Backend (etcd / ConcurrentHashMap)
+PartitionManager → RegistryStore → Backend (etcd / Oracle / ConcurrentHashMap)
 ```
 
 **Dependency rule:**
@@ -44,7 +44,7 @@ Consumer has NO direct store dependency — all checkpoint reads/writes go throu
 src/main/java/com/pxrs/
 ├── PxrsModule.java                    — Guice AbstractModule: wires config, store, coordinator, producer, queues
 ├── shared/
-│   ├── PxrsConfig.java              — Builder-pattern config (numPartitions, leaseTtl, rebalanceInterval, etcdEndpoints, keyPrefix)
+│   ├── PxrsConfig.java              — Builder-pattern config (numPartitions, leaseTtl, rebalanceInterval, etcdEndpoints, keyPrefix, jdbcUrl/Username/Password)
 │   ├── Message.java                 — Immutable (id, partitionKey, partitionId, payload, timestamp)
 │   ├── PartitionState.java          — Mutable with volatile fields (partitionId, ownerId, lastCheckpoint, versionEpoch, lastHeartbeat)
 │   ├── ConsumerInfo.java            — Mutable (consumerId, registeredAt, lastSeen)
@@ -53,8 +53,10 @@ src/main/java/com/pxrs/
 │   └── PartitionQueues.java         — Map<Integer, BlockingQueue<Message>>, @Inject from PxrsConfig
 ├── store/
 │   ├── RegistryStore.java           — THE core interface (lifecycle, consumer registry, partition state, CAS claim, release, checkpoint, zombie detection)
+│   ├── StoreType.java               — Enum: IN_MEMORY, ETCD, ORACLE — selects backend in PxrsModule
 │   ├── InMemoryRegistryStore.java   — ConcurrentHashMap + synchronized blocks, @Inject from PxrsConfig (derives heartbeat from leaseTtl)
-│   └── EtcdRegistryStore.java       — jetcd Txn CAS on modRevision, lease-based auto-expiry, @Inject from PxrsConfig
+│   ├── EtcdRegistryStore.java       — jetcd Txn CAS on modRevision, lease-based auto-expiry, @Inject from PxrsConfig
+│   └── OracleRegistryStore.java     — Plain JDBC (single connection), MERGE for upserts, optimistic CAS via version_epoch, @Inject from PxrsConfig
 ├── producer/
 │   ├── Producer.java                — Interface: send, getNextMessage, getLatestOffset
 │   └── SimpleProducer.java          — In-memory buffer + PartitionQueues push on send(), @Inject from PxrsConfig
@@ -131,10 +133,12 @@ src/main/java/com/pxrs/
 ### CAS Claiming
 - **InMemory**: `synchronized` block checks epoch + unowned, then sets owner + bumps epoch
 - **etcd**: Txn API with `Cmp(modRevision == expected)` → linearizable CAS via Raft
+- **Oracle**: `UPDATE ... WHERE version_epoch = ? AND (owner_id = '' OR owner_id IS NULL)` → optimistic CAS via `updateCount == 1`
 
 ### Zombie Detection
 - **InMemory**: `getExpiredPartitions()` checks if owner is deregistered OR heartbeat exceeds `heartbeatTimeoutMs` (derived from `leaseTtlSeconds * 1000`)
 - **etcd**: Consumer key attached to lease with TTL → process death = lease expiry = key deleted → partition owner not in active consumers
+- **Oracle**: SQL query joins `pxrs_partitions` with `NOT IN (SELECT consumer_id FROM pxrs_consumers)` OR stale heartbeat check — same logic as InMemory
 
 ### Fair-Share Rebalance
 - `base = numPartitions / numConsumers`, `remainder = numPartitions % numConsumers`
@@ -151,7 +155,7 @@ src/main/java/com/pxrs/
 - `PartitionManager` (Singleton, reads numPartitions from PxrsConfig)
 - `ConsumerCoordinator` (Singleton)
 - `Producer` → `SimpleProducer` (Singleton, reads numPartitions from PxrsConfig)
-- `RegistryStore` → `InMemoryRegistryStore` or `EtcdRegistryStore` based on `useEtcd` flag
+- `RegistryStore` → `InMemoryRegistryStore`, `EtcdRegistryStore`, or `OracleRegistryStore` based on `StoreType` enum
 
 ### ConsumerFactory
 - @Singleton, @Inject constructor takes PartitionQueues, Producer, ConsumerCoordinator
@@ -162,7 +166,8 @@ src/main/java/com/pxrs/
 ```bash
 mvn clean compile test          # Build + 42 tests
 mvn exec:java -Dexec.mainClass=com.pxrs.demo.PxrsDemo              # In-memory demo
-mvn exec:java -Dexec.mainClass=com.pxrs.demo.PxrsDemo -Dexec.args="--etcd"  # etcd demo (requires local etcd)
+mvn exec:java -Dexec.mainClass=com.pxrs.demo.PxrsDemo -Dexec.args="--etcd"    # etcd demo (requires local etcd)
+mvn exec:java -Dexec.mainClass=com.pxrs.demo.PxrsDemo -Dexec.args="--oracle"  # Oracle demo (requires Oracle DB, see doc/oracle-ddl.sql)
 ```
 
 ## Tests (42 total, all passing)
@@ -176,7 +181,7 @@ mvn exec:java -Dexec.mainClass=com.pxrs.demo.PxrsDemo -Dexec.args="--etcd"  # et
 
 ```
 // Setup (Guice)
-Injector injector = Guice.createInjector(new PxrsModule(config, useEtcd));
+Injector injector = Guice.createInjector(new PxrsModule(config, StoreType.IN_MEMORY));
 ConsumerFactory factory = injector.getInstance(ConsumerFactory.class);
 ConsumerCoordinator coordinator = injector.getInstance(ConsumerCoordinator.class);
 
@@ -215,6 +220,15 @@ consumer.stop()
 /pxrs/consumers/{consumerId} → "registeredAt" (attached to lease)
 ```
 
+## Oracle Table Layout
+
+DDL script: `doc/oracle-ddl.sql`
+
+```
+pxrs_partitions (partition_id PK, owner_id, last_checkpoint, version_epoch, last_heartbeat)
+pxrs_consumers  (consumer_id PK, registered_at, last_seen)
+```
+
 ## Known Limitations / Future Work
 
 - SimpleProducer is in-memory only (no persistence/replication)
@@ -222,11 +236,13 @@ consumer.stop()
 - No end-to-end integration tests for SimpleConsumer
 - etcd Watch API for real-time rebalance notifications not yet implemented
 - No backpressure or batching in consumer consume loop
-- ConsumerCoordinator uses Java 17 pattern matching: `if (store instanceof InMemoryRegistryStore memStore)`
+- ConsumerCoordinator uses Java 17 pattern matching: `if (store instanceof InMemoryRegistryStore memStore)` / `OracleRegistryStore oracleStore`
+- No OracleRegistryStore tests (requires running Oracle DB)
 
 ## Dependencies
 
 - `io.etcd:jetcd-core:0.7.7` (brings in gRPC, Netty, Protobuf transitively)
+- `com.oracle.database.jdbc:ojdbc11:23.6.0.24.10` (Oracle JDBC driver)
 - `com.google.inject:guice:7.0.0` (Guice DI)
 - `junit:junit:4.13.2` (test scope)
 - `org.codehaus.mojo:exec-maven-plugin:3.1.0` (for demo execution)
