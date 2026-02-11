@@ -15,27 +15,13 @@ Today, XRS follows a **single-consumer, single-global-checkpoint** model. One co
 #### How It Works Today
 
 ```mermaid
-sequenceDiagram
-    participant Consumer
-    participant XRS as XRS Queue
-    participant Producer
-
-    Consumer->>XRS: subscribe(checkpoint=0)
-    Note over Consumer,XRS: Single consumer, single global checkpoint
-
-    Producer->>XRS: send(msg-0)
-    Producer->>XRS: send(msg-1)
-    Producer->>XRS: send(msg-2)
-
-    XRS->>Consumer: msg-0
-    Consumer->>XRS: commit(checkpoint=1)
-    XRS->>Consumer: msg-1
-    Consumer->>XRS: commit(checkpoint=2)
-    XRS->>Consumer: msg-2
-    Consumer->>XRS: commit(checkpoint=3)
-
-    Note over Consumer,XRS: One consumer processes everything sequentially.<br/>Global checkpoint = 3.<br/>No way to add a second consumer safely.
+flowchart LR
+    Producer -->|send msgs| Q[XRS Queue\nall messages in one stream]
+    Q -->|subscribe\ncheckpoint=N| Consumer[Single Consumer]
+    Consumer -->|commit\ncheckpoint=N+1| Q
 ```
+
+One consumer, one queue, one global checkpoint. No way to add a second consumer safely.
 
 This works fine at low throughput, but it creates a hard ceiling:
 
@@ -82,52 +68,7 @@ The rule is simple: `base = partitions ÷ consumers`, and the first few consumer
 
 Why not just use 1 partition per consumer? Because a fixed higher count gives us room to scale without redeployment. If we start with 2 consumers and later need 4, the coordinator just redistributes the same 8 partitions — no data migration, no config change.
 
-#### How It Would Work With Partitioning
-
-```mermaid
-sequenceDiagram
-    participant CA as Consumer-A
-    participant CB as Consumer-B
-    participant COORD as Coordinator
-    participant Store as Store (DB)
-    participant XRS as XRS Queue
-
-    Note over COORD,Store: Partitions P0..P7 pre-created at deploy time
-
-    CA->>COORD: register(consumer-A)
-    COORD->>Store: Record consumer-A, compute fair-share
-    COORD-->>CA: assigned(P0 checkpoint=0, P1 checkpoint=0, ..., P7 checkpoint=0)
-
-    CA->>XRS: subscribe(partition=P0, checkpoint=0)
-    CA->>XRS: subscribe(partition=P1, checkpoint=0)
-    Note over CA: subscribes to all 8 partitions
-
-    XRS->>CA: msg (P0)
-    CA->>COORD: commit(P0, checkpoint=1)
-    COORD->>Store: save checkpoint P0=1
-
-    Note over CB: New consumer comes up
-
-    CB->>COORD: register(consumer-B)
-    COORD->>Store: Recompute fair-share (8÷2 = 4 each)
-
-    COORD->>CA: revoke(P4, P5, P6, P7)
-    CA->>COORD: flush final checkpoints
-    CA->>XRS: unsubscribe(P4, P5, P6, P7)
-
-    COORD->>Store: Read checkpoints for P4..P7
-    COORD-->>CB: assigned(P4 checkpoint=12, P5 checkpoint=8, P6 checkpoint=5, P7 checkpoint=3)
-
-    CB->>XRS: subscribe(partition=P4, checkpoint=12)
-    CB->>XRS: subscribe(partition=P5, checkpoint=8)
-    Note over CB: Resumes from saved checkpoints, not from 0
-
-    Note over CA,CB: Now both consumers process in parallel.<br/>Each owns 4 partitions. No overlap. No duplication.
-```
-
-The key difference from today: consumers don't just `subscribe(checkpoint)` against the whole queue. They **register** with a coordinator first, receive specific **partition + checkpoint** pairs, and then `subscribe(partition, checkpoint)` only for their assigned partitions.
-
-#### High-Level Architecture
+#### High-Level Architecture — Proposed
 
 ```mermaid
 flowchart TB
@@ -178,48 +119,11 @@ flowchart TB
 | **Epoch fencing** | Every partition carries a version epoch that increments on ownership change. Checkpoint writes must match current epoch — a stale consumer's late writes are rejected |
 | **Recovery** | Crashed consumer's partitions get reassigned. New owner resumes from per-partition checkpoint — not from zero |
 
----
-
-### Rebalance Scenario — Consumer Crash & Recovery
-
-```mermaid
-sequenceDiagram
-    participant COORD as Coordinator
-    participant CA as Consumer-A
-    participant CB as Consumer-B
-    participant CC as Consumer-C
-    participant DB as Store (DB)
-
-    Note over COORD: t0 — Steady state
-    Note over CA: Owns P0,P1,P2
-    Note over CB: Owns P3,P4,P5
-    Note over CC: Owns P6,P7
-
-    CB->>CB: CRASHES
-
-    Note over COORD: t1 — Coordinator detects C-B gone
-
-    COORD->>CA: Revoke P2 (you'll lose one)
-    CA->>DB: Flush checkpoint P2=210
-    CA-->>COORD: Revocation complete
-
-    COORD->>DB: Read checkpoints for P2,P3,P4,P5
-
-    COORD->>CA: Assign P3 (checkpoint=180)
-    COORD->>CC: Assign P2,P4,P5 (checkpoints=210,95,140)
-
-    Note over CA: Now owns P0,P1,P3
-    Note over CC: Now owns P2,P4,P5,P6,P7
-
-    CA->>CA: Resume P3 from offset 180
-    CC->>CC: Resume P2 from 210, P4 from 95, P5 from 140
-
-    Note over COORD: No messages lost. No reprocessing beyond last checkpoint.
-```
+The key API change: instead of `subscribe(checkpoint)` against the whole queue, a consumer would **register** with the coordinator, receive specific **partition + checkpoint** pairs, and then `subscribe(partition, checkpoint)` only for its assigned partitions. We can walk through the detailed interaction flow on a call.
 
 ---
 
-### Checkpoint Flow
+### Checkpoint State — What Gets Stored
 
 The checkpoint data itself is simple — just a partition ID and an offset number, stored per partition:
 
