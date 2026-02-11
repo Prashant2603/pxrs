@@ -72,13 +72,26 @@ Why not just use 1 partition per consumer? Because a fixed higher count gives us
 
 ```mermaid
 flowchart TB
-    P[Producer] -->|hash partitionKey| PB
+    P[Producer] -->|send| Q
 
-    subgraph PB[Partition Buffers]
-        P0[P0]
-        P1[P1]
-        P2[P2]
-        P3[P3]
+    subgraph Q[XRS Queue — raw message stream]
+        direction LR
+        M1[Msg1\nkey=acct-3]
+        M2[Msg2\nkey=acct-7]
+        M3[Msg3\nkey=acct-3]
+        M4[Msg4\nkey=acct-1]
+        M5[Msg5\nkey=acct-7]
+        M6[Msg6\nkey=acct-5]
+        M7[...]
+    end
+
+    Q -->|hash partitionKey\nvirtual grouping| VPQ
+
+    subgraph VPQ[Queue — Partitioned View]
+        P0[P0: Msg1, Msg3]
+        P1[P1: Msg4]
+        P2[P2: Msg6]
+        P3[P3: Msg2, Msg5]
         P4[P4]
         P5[P5]
         P6[P6]
