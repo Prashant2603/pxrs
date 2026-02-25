@@ -1,3 +1,9 @@
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
 title: |md
   # New Architecture: Producer → Orchestrator Cluster → xRS Consumers → Shared DB
 |
@@ -6,53 +12,177 @@ direction: down
 
 producer: Producer {
   shape: rectangle
+  style.fill: "#BF360C"
+  style.stroke: "#7F0000"
+  style.font-color: "#FFFFFF"
+  style.bold: true
+  style.border-radius: 6
 }
 
 orchestrator: Orchestrator Cluster (Raft) {
+  style.fill: "#E3F2FD"
+  style.stroke: "#1565C0"
+  style.stroke-width: 2
+  style.border-radius: 10
+
   leader: Leader {
     shape: rectangle
+    style.fill: "#1565C0"
+    style.stroke: "#0D47A1"
+    style.font-color: "#FFFFFF"
+    style.bold: true
+    style.border-radius: 6
   }
   f1: Follower 1 {
     shape: rectangle
+    style.fill: "#5C9EDB"
+    style.stroke: "#1565C0"
+    style.font-color: "#FFFFFF"
+    style.border-radius: 6
   }
   f2: Follower 2 {
     shape: rectangle
+    style.fill: "#5C9EDB"
+    style.stroke: "#1565C0"
+    style.font-color: "#FFFFFF"
+    style.border-radius: 6
   }
 
-  leader -> f1: Raft log replication
-  leader -> f2: Raft log replication
-  f1 -> leader: elect on leader failure
-  f2 -> leader: elect on leader failure
+  leader -> f1: Raft log replication {
+    style.stroke: "#F9A825"
+    style.stroke-width: 2
+    style.font-color: "#E65100"
+    style.bold: true
+  }
+  leader -> f2: Raft log replication {
+    style.stroke: "#F9A825"
+    style.stroke-width: 2
+    style.font-color: "#E65100"
+    style.bold: true
+  }
+  f1 -> leader: elect on leader failure {
+    style.stroke: "#F9A825"
+    style.stroke-width: 1
+    style.stroke-dash: 5
+    style.font-color: "#E65100"
+  }
+  f2 -> leader: elect on leader failure {
+    style.stroke: "#F9A825"
+    style.stroke-width: 1
+    style.stroke-dash: 5
+    style.font-color: "#E65100"
+  }
 }
 
 xrs: xRS Consumers {
+  style.fill: "#E8F5E9"
+  style.stroke: "#2E7D32"
+  style.stroke-width: 2
+  style.border-radius: 10
+
   xrs1: xRS-1 {
     shape: rectangle
+    style.fill: "#2E7D32"
+    style.stroke: "#1B5E20"
+    style.font-color: "#FFFFFF"
+    style.bold: true
+    style.border-radius: 6
   }
   xrs2: xRS-2 {
     shape: rectangle
+    style.fill: "#2E7D32"
+    style.stroke: "#1B5E20"
+    style.font-color: "#FFFFFF"
+    style.bold: true
+    style.border-radius: 6
   }
   xrs3: xRS-3 {
     shape: rectangle
+    style.fill: "#2E7D32"
+    style.stroke: "#1B5E20"
+    style.font-color: "#FFFFFF"
+    style.bold: true
+    style.border-radius: 6
   }
 }
 
 db: Consumer DB {
   shape: cylinder
+  style.fill: "#4A148C"
+  style.stroke: "#38006B"
+  style.font-color: "#FFFFFF"
+  style.bold: true
 }
 
-producer -> xrs.xrs1: partition stream (p0, p1, p2)
-producer -> xrs.xrs2: partition stream (p3, p4, p5)
-producer -> xrs.xrs3: partition stream (p6, p7)
+producer -> xrs.xrs1: partition stream (p0, p1, p2) {
+  style.stroke: "#BF360C"
+  style.stroke-width: 2
+  style.font-color: "#BF360C"
+  style.bold: true
+}
+producer -> xrs.xrs2: partition stream (p3, p4, p5) {
+  style.stroke: "#BF360C"
+  style.stroke-width: 2
+  style.font-color: "#BF360C"
+  style.bold: true
+}
+producer -> xrs.xrs3: partition stream (p6, p7) {
+  style.stroke: "#BF360C"
+  style.stroke-width: 2
+  style.font-color: "#BF360C"
+  style.bold: true
+}
 
-orchestrator.leader -> xrs.xrs1: ASSIGN / REVOKE
-orchestrator.leader -> xrs.xrs2: ASSIGN / REVOKE
-orchestrator.leader -> xrs.xrs3: ASSIGN / REVOKE
+orchestrator.leader -> xrs.xrs1: ASSIGN / REVOKE {
+  style.stroke: "#1565C0"
+  style.stroke-width: 2
+  style.font-color: "#1565C0"
+  style.bold: true
+}
+orchestrator.leader -> xrs.xrs2: ASSIGN / REVOKE {
+  style.stroke: "#1565C0"
+  style.stroke-width: 2
+  style.font-color: "#1565C0"
+  style.bold: true
+}
+orchestrator.leader -> xrs.xrs3: ASSIGN / REVOKE {
+  style.stroke: "#1565C0"
+  style.stroke-width: 2
+  style.font-color: "#1565C0"
+  style.bold: true
+}
 
-xrs.xrs1 -> orchestrator.leader: REGISTER / HEARTBEAT
-xrs.xrs2 -> orchestrator.leader: REGISTER / HEARTBEAT
-xrs.xrs3 -> orchestrator.leader: REGISTER / HEARTBEAT
+xrs.xrs1 -> orchestrator.leader: REGISTER / HEARTBEAT {
+  style.stroke: "#546E7A"
+  style.stroke-width: 1
+  style.stroke-dash: 5
+  style.font-color: "#546E7A"
+}
+xrs.xrs2 -> orchestrator.leader: REGISTER / HEARTBEAT {
+  style.stroke: "#546E7A"
+  style.stroke-width: 1
+  style.stroke-dash: 5
+  style.font-color: "#546E7A"
+}
+xrs.xrs3 -> orchestrator.leader: REGISTER / HEARTBEAT {
+  style.stroke: "#546E7A"
+  style.stroke-width: 1
+  style.stroke-dash: 5
+  style.font-color: "#546E7A"
+}
 
-xrs.xrs1 -> db: read checkpoint on ASSIGN\nwrite checkpoint + data per message
-xrs.xrs2 -> db: read checkpoint on ASSIGN\nwrite checkpoint + data per message
-xrs.xrs3 -> db: read checkpoint on ASSIGN\nwrite checkpoint + data per message
+xrs.xrs1 -> db: read checkpoint on ASSIGN\nwrite checkpoint + data per message {
+  style.stroke: "#4A148C"
+  style.stroke-width: 2
+  style.font-color: "#4A148C"
+}
+xrs.xrs2 -> db: read checkpoint on ASSIGN\nwrite checkpoint + data per message {
+  style.stroke: "#4A148C"
+  style.stroke-width: 2
+  style.font-color: "#4A148C"
+}
+xrs.xrs3 -> db: read checkpoint on ASSIGN\nwrite checkpoint + data per message {
+  style.stroke: "#4A148C"
+  style.stroke-width: 2
+  style.font-color: "#4A148C"
+}

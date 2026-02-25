@@ -1,3 +1,9 @@
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
 title: |md
   # Orchestrator Zoom: Consumer Lifecycle Management
 |
@@ -5,94 +11,261 @@ title: |md
 direction: right
 
 orchestrator: Orchestrator Cluster {
+  style.fill: "#E3F2FD"
+  style.stroke: "#1565C0"
+  style.stroke-width: 2
+  style.border-radius: 10
+
   leader: Leader Node {
     shape: rectangle
+    style.fill: "#BBDEFB"
+    style.stroke: "#1565C0"
+    style.stroke-width: 2
+    style.border-radius: 8
 
     registry: Consumer Registry {
       shape: rectangle
       label: "Consumer Registry\nxrs-1: alive\nxrs-2: alive\nxrs-3: alive"
+      style.fill: "#1565C0"
+      style.stroke: "#0D47A1"
+      style.font-color: "#FFFFFF"
+      style.border-radius: 6
     }
 
     pmap: Partition Map {
       shape: rectangle
       label: "Partition Map\np0,p1,p2 → xrs-1\np3,p4,p5 → xrs-2\np6,p7   → xrs-3"
+      style.fill: "#1565C0"
+      style.stroke: "#0D47A1"
+      style.font-color: "#FFFFFF"
+      style.border-radius: 6
     }
 
     sm: State Machine {
       shape: rectangle
       label: "State Machine\napplyTransaction()\nrebalance()\nnotifyXRS()"
+      style.fill: "#1565C0"
+      style.stroke: "#0D47A1"
+      style.font-color: "#FFFFFF"
+      style.border-radius: 6
     }
 
-    registry -> sm: membership change triggers rebalance
-    sm -> pmap: updates ownership
+    registry -> sm: membership change triggers rebalance {
+      style.stroke: "#F9A825"
+      style.stroke-width: 2
+      style.font-color: "#E65100"
+      style.bold: true
+    }
+    sm -> pmap: updates ownership {
+      style.stroke: "#F9A825"
+      style.stroke-width: 2
+      style.font-color: "#E65100"
+      style.bold: true
+    }
   }
 
   f1: Follower 1 {
     shape: rectangle
-    label: "Follower 1\n(mirrors leader state\nready to elect)"
+    label: "Follower 1\nmirrors leader state\nready to elect"
+    style.fill: "#5C9EDB"
+    style.stroke: "#1565C0"
+    style.font-color: "#FFFFFF"
+    style.border-radius: 6
   }
   f2: Follower 2 {
     shape: rectangle
-    label: "Follower 2\n(mirrors leader state\nready to elect)"
+    label: "Follower 2\nmirrors leader state\nready to elect"
+    style.fill: "#5C9EDB"
+    style.stroke: "#1565C0"
+    style.font-color: "#FFFFFF"
+    style.border-radius: 6
   }
 
-  leader -> f1: Raft log replication (all decisions durable)
-  leader -> f2: Raft log replication (all decisions durable)
+  leader -> f1: Raft log replication {
+    style.stroke: "#F9A825"
+    style.stroke-width: 2
+    style.font-color: "#E65100"
+    style.bold: true
+  }
+  leader -> f2: Raft log replication {
+    style.stroke: "#F9A825"
+    style.stroke-width: 2
+    style.font-color: "#E65100"
+    style.bold: true
+  }
 }
 
 xrs1: xRS-1 {
   shape: rectangle
   label: "xRS-1\nowns: p0, p1, p2"
+  style.fill: "#2E7D32"
+  style.stroke: "#1B5E20"
+  style.font-color: "#FFFFFF"
+  style.bold: true
+  style.border-radius: 6
 }
 
 xrs2: xRS-2 {
   shape: rectangle
   label: "xRS-2\nowns: p3, p4, p5"
+  style.fill: "#2E7D32"
+  style.stroke: "#1B5E20"
+  style.font-color: "#FFFFFF"
+  style.bold: true
+  style.border-radius: 6
 }
 
 xrs3: xRS-3 {
   shape: rectangle
   label: "xRS-3\nowns: p6, p7"
+  style.fill: "#2E7D32"
+  style.stroke: "#1B5E20"
+  style.font-color: "#FFFFFF"
+  style.bold: true
+  style.border-radius: 6
 }
 
 db: Consumer DB {
   shape: cylinder
+  style.fill: "#F3E5F5"
+  style.stroke: "#4A148C"
+  style.stroke-width: 2
 
   ckpt: partition_checkpoints {
     shape: rectangle
-    label: "partition_checkpoints\np0: offset=142\np3: offset=89\np6: offset=201\n..."
+    label: "partition_checkpoints\np0: offset=142\np3: offset=89\np6: offset=201"
+    style.fill: "#4A148C"
+    style.stroke: "#38006B"
+    style.font-color: "#FFFFFF"
+    style.border-radius: 6
   }
 
   biz: business_data {
     shape: rectangle
     label: "business_data\norders / events / ..."
+    style.fill: "#6A1B9A"
+    style.stroke: "#4A148C"
+    style.font-color: "#FFFFFF"
+    style.border-radius: 6
   }
 }
 
-# xRS → Orchestrator: registration and liveness
-xrs1 -> orchestrator.leader.registry: "1. REGISTER on boot"
-xrs2 -> orchestrator.leader.registry: "1. REGISTER on boot"
-xrs3 -> orchestrator.leader.registry: "1. REGISTER on boot"
+# ① xRS → Orchestrator: REGISTER on boot
+xrs1 -> orchestrator.leader.registry: "① REGISTER on boot" {
+  style.stroke: "#546E7A"
+  style.stroke-width: 1
+  style.stroke-dash: 5
+  style.font-color: "#546E7A"
+}
+xrs2 -> orchestrator.leader.registry: "① REGISTER on boot" {
+  style.stroke: "#546E7A"
+  style.stroke-width: 1
+  style.stroke-dash: 5
+  style.font-color: "#546E7A"
+}
+xrs3 -> orchestrator.leader.registry: "① REGISTER on boot" {
+  style.stroke: "#546E7A"
+  style.stroke-width: 1
+  style.stroke-dash: 5
+  style.font-color: "#546E7A"
+}
 
-xrs1 -> orchestrator.leader: "2. HEARTBEAT (periodic)"
-xrs2 -> orchestrator.leader: "2. HEARTBEAT (periodic)"
-xrs3 -> orchestrator.leader: "2. HEARTBEAT (periodic)"
+# ② xRS → Orchestrator: periodic HEARTBEAT
+xrs1 -> orchestrator.leader: "② HEARTBEAT (periodic)" {
+  style.stroke: "#546E7A"
+  style.stroke-width: 1
+  style.stroke-dash: 5
+  style.font-color: "#546E7A"
+}
+xrs2 -> orchestrator.leader: "② HEARTBEAT (periodic)" {
+  style.stroke: "#546E7A"
+  style.stroke-width: 1
+  style.stroke-dash: 5
+  style.font-color: "#546E7A"
+}
+xrs3 -> orchestrator.leader: "② HEARTBEAT (periodic)" {
+  style.stroke: "#546E7A"
+  style.stroke-width: 1
+  style.stroke-dash: 5
+  style.font-color: "#546E7A"
+}
 
-# Orchestrator → xRS: partition lifecycle
-orchestrator.leader.sm -> xrs1: "3. REVOKE \[lost partitions\]"
-orchestrator.leader.sm -> xrs2: "3. REVOKE \[lost partitions\]"
-orchestrator.leader.sm -> xrs3: "3. REVOKE \[lost partitions\]"
+# ③ Orchestrator → xRS: REVOKE (phase 1)
+orchestrator.leader.sm -> xrs1: "③ REVOKE \[lost partitions\]" {
+  style.stroke: "#C62828"
+  style.stroke-width: 2
+  style.font-color: "#C62828"
+  style.bold: true
+}
+orchestrator.leader.sm -> xrs2: "③ REVOKE \[lost partitions\]" {
+  style.stroke: "#C62828"
+  style.stroke-width: 2
+  style.font-color: "#C62828"
+  style.bold: true
+}
+orchestrator.leader.sm -> xrs3: "③ REVOKE \[lost partitions\]" {
+  style.stroke: "#C62828"
+  style.stroke-width: 2
+  style.font-color: "#C62828"
+  style.bold: true
+}
 
-orchestrator.leader.sm -> xrs1: "4. ASSIGN \[p0,p1,p2\]"
-orchestrator.leader.sm -> xrs2: "4. ASSIGN \[p3,p4,p5\]"
-orchestrator.leader.sm -> xrs3: "4. ASSIGN \[p6,p7\]"
+# ④ Orchestrator → xRS: ASSIGN (phase 2)
+orchestrator.leader.sm -> xrs1: "④ ASSIGN \[p0,p1,p2\]" {
+  style.stroke: "#1565C0"
+  style.stroke-width: 2
+  style.font-color: "#1565C0"
+  style.bold: true
+}
+orchestrator.leader.sm -> xrs2: "④ ASSIGN \[p3,p4,p5\]" {
+  style.stroke: "#1565C0"
+  style.stroke-width: 2
+  style.font-color: "#1565C0"
+  style.bold: true
+}
+orchestrator.leader.sm -> xrs3: "④ ASSIGN \[p6,p7\]" {
+  style.stroke: "#1565C0"
+  style.stroke-width: 2
+  style.font-color: "#1565C0"
+  style.bold: true
+}
 
-# xRS → DB: read checkpoint on assignment start
-xrs1 -> db.ckpt: "5. SELECT offset WHERE partition_id IN (p0,p1,p2)"
-xrs2 -> db.ckpt: "5. SELECT offset WHERE partition_id IN (p3,p4,p5)"
-xrs3 -> db.ckpt: "5. SELECT offset WHERE partition_id IN (p6,p7)"
+# ⑤ xRS → DB: read checkpoint on assignment
+xrs1 -> db.ckpt: "⑤ SELECT offset WHERE partition IN (p0,p1,p2)" {
+  style.stroke: "#6A1B9A"
+  style.stroke-width: 1
+  style.stroke-dash: 4
+  style.font-color: "#4A148C"
+}
+xrs2 -> db.ckpt: "⑤ SELECT offset WHERE partition IN (p3,p4,p5)" {
+  style.stroke: "#6A1B9A"
+  style.stroke-width: 1
+  style.stroke-dash: 4
+  style.font-color: "#4A148C"
+}
+xrs3 -> db.ckpt: "⑤ SELECT offset WHERE partition IN (p6,p7)" {
+  style.stroke: "#6A1B9A"
+  style.stroke-width: 1
+  style.stroke-dash: 4
+  style.font-color: "#4A148C"
+}
 
-# xRS → DB: transactional write per message processed
-xrs1 -> db.biz: "6. BEGIN\n   INSERT processed data\n   UPDATE checkpoint\n   COMMIT"
-xrs2 -> db.biz: "6. BEGIN\n   INSERT processed data\n   UPDATE checkpoint\n   COMMIT"
-xrs3 -> db.biz: "6. BEGIN\n   INSERT processed data\n   UPDATE checkpoint\n   COMMIT"
+# ⑥ xRS → DB: transactional write per message
+xrs1 -> db.biz: "⑥ BEGIN / INSERT data / UPDATE checkpoint / COMMIT" {
+  style.stroke: "#4A148C"
+  style.stroke-width: 2
+  style.font-color: "#4A148C"
+  style.bold: true
+}
+xrs2 -> db.biz: "⑥ BEGIN / INSERT data / UPDATE checkpoint / COMMIT" {
+  style.stroke: "#4A148C"
+  style.stroke-width: 2
+  style.font-color: "#4A148C"
+  style.bold: true
+}
+xrs3 -> db.biz: "⑥ BEGIN / INSERT data / UPDATE checkpoint / COMMIT" {
+  style.stroke: "#4A148C"
+  style.stroke-width: 2
+  style.font-color: "#4A148C"
+  style.bold: true
+}
