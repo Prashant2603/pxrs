@@ -1,0 +1,98 @@
+title: |md
+  # Orchestrator Zoom: Consumer Lifecycle Management
+|
+
+direction: right
+
+orchestrator: Orchestrator Cluster {
+  leader: Leader Node {
+    shape: rectangle
+
+    registry: Consumer Registry {
+      shape: rectangle
+      label: "Consumer Registry\nxrs-1: alive\nxrs-2: alive\nxrs-3: alive"
+    }
+
+    pmap: Partition Map {
+      shape: rectangle
+      label: "Partition Map\np0,p1,p2 → xrs-1\np3,p4,p5 → xrs-2\np6,p7   → xrs-3"
+    }
+
+    sm: State Machine {
+      shape: rectangle
+      label: "State Machine\napplyTransaction()\nrebalance()\nnotifyXRS()"
+    }
+
+    registry -> sm: membership change triggers rebalance
+    sm -> pmap: updates ownership
+  }
+
+  f1: Follower 1 {
+    shape: rectangle
+    label: "Follower 1\n(mirrors leader state\nready to elect)"
+  }
+  f2: Follower 2 {
+    shape: rectangle
+    label: "Follower 2\n(mirrors leader state\nready to elect)"
+  }
+
+  leader -> f1: Raft log replication (all decisions durable)
+  leader -> f2: Raft log replication (all decisions durable)
+}
+
+xrs1: xRS-1 {
+  shape: rectangle
+  label: "xRS-1\nowns: p0, p1, p2"
+}
+
+xrs2: xRS-2 {
+  shape: rectangle
+  label: "xRS-2\nowns: p3, p4, p5"
+}
+
+xrs3: xRS-3 {
+  shape: rectangle
+  label: "xRS-3\nowns: p6, p7"
+}
+
+db: Consumer DB {
+  shape: cylinder
+
+  ckpt: partition_checkpoints {
+    shape: rectangle
+    label: "partition_checkpoints\np0: offset=142\np3: offset=89\np6: offset=201\n..."
+  }
+
+  biz: business_data {
+    shape: rectangle
+    label: "business_data\norders / events / ..."
+  }
+}
+
+# xRS → Orchestrator: registration and liveness
+xrs1 -> orchestrator.leader.registry: "1. REGISTER on boot"
+xrs2 -> orchestrator.leader.registry: "1. REGISTER on boot"
+xrs3 -> orchestrator.leader.registry: "1. REGISTER on boot"
+
+xrs1 -> orchestrator.leader: "2. HEARTBEAT (periodic)"
+xrs2 -> orchestrator.leader: "2. HEARTBEAT (periodic)"
+xrs3 -> orchestrator.leader: "2. HEARTBEAT (periodic)"
+
+# Orchestrator → xRS: partition lifecycle
+orchestrator.leader.sm -> xrs1: "3. REVOKE \[lost partitions\]"
+orchestrator.leader.sm -> xrs2: "3. REVOKE \[lost partitions\]"
+orchestrator.leader.sm -> xrs3: "3. REVOKE \[lost partitions\]"
+
+orchestrator.leader.sm -> xrs1: "4. ASSIGN \[p0,p1,p2\]"
+orchestrator.leader.sm -> xrs2: "4. ASSIGN \[p3,p4,p5\]"
+orchestrator.leader.sm -> xrs3: "4. ASSIGN \[p6,p7\]"
+
+# xRS → DB: read checkpoint on assignment start
+xrs1 -> db.ckpt: "5. SELECT offset WHERE partition_id IN (p0,p1,p2)"
+xrs2 -> db.ckpt: "5. SELECT offset WHERE partition_id IN (p3,p4,p5)"
+xrs3 -> db.ckpt: "5. SELECT offset WHERE partition_id IN (p6,p7)"
+
+# xRS → DB: transactional write per message processed
+xrs1 -> db.biz: "6. BEGIN\n   INSERT processed data\n   UPDATE checkpoint\n   COMMIT"
+xrs2 -> db.biz: "6. BEGIN\n   INSERT processed data\n   UPDATE checkpoint\n   COMMIT"
+xrs3 -> db.biz: "6. BEGIN\n   INSERT processed data\n   UPDATE checkpoint\n   COMMIT"
